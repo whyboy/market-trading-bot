@@ -29,5 +29,23 @@
   "schedule": {
     "trade_time": "14:30",
     "report_time": "15:15"
+  },
+  "instruments": {
+    "518880.XSHG": {
+      "lot_size": 100,
+      "t_plus_one": false
+    },
+    "513100.XSHG": {
+      "lot_size": 100,
+      "t_plus_one": false
+    },
+    "159915.XSHE": {
+      "lot_size": 100,
+      "t_plus_one": true
+    },
+    "510180.XSHG": {
+      "lot_size": 100,
+      "t_plus_one": true
+    }
   }
 }

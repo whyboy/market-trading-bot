@@ -1,4 +1,4 @@
-"""从仓库任意工作目录运行信号预览，不提交交易或写入账户。"""
+"""运行信号预览，或为指定模拟实例执行一次调仓。"""
 import argparse
 import json
 import sys
@@ -9,17 +9,18 @@ sys.path.insert(0, str(ROOT / 'src'))
 
 
 def main() -> int:
-    """运行信号预览并输出 JSON；成功返回 0，失败输出错误并返回 1。"""
-    parser = argparse.ArgumentParser(description='ETF策略信号预览（不交易）')
+    """输出信号或模拟调仓结果；成功返回 0，失败输出错误并返回 1。"""
+    parser = argparse.ArgumentParser(description='ETF策略信号预览与模拟调仓')
     parser.add_argument('--config', default='config/etf_rotation_strategy.json', help='策略JSON路径，相对仓库根目录')
+    parser.add_argument('--paper', metavar='INSTANCE_ID', help='为指定pap实例模拟调仓并记账；默认仅预览')
     args = parser.parse_args()
-    from market_trading_bot.runner import preview_signals
+    from market_trading_bot.runner import preview_signals, run_paper
     try:
-        result = preview_signals(ROOT, ROOT / args.config)
+        result = run_paper(ROOT, ROOT / args.config, args.paper) if args.paper is not None else preview_signals(ROOT, ROOT / args.config)
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str, allow_nan=False))
         return 0
     except Exception as exc:
-        print(f'信号预览失败: {exc}', file=sys.stderr)
+        print(f'运行失败: {exc}', file=sys.stderr)
         return 1
 
 
