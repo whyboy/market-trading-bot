@@ -24,6 +24,9 @@ class PapAccountStore:
         self.database = self.directory / 'ledger.sqlite3'
         with closing(sqlite3.connect(self.database)) as connection, connection:
             connection.execute('CREATE TABLE IF NOT EXISTS runs (day TEXT PRIMARY KEY, payload TEXT NOT NULL)')
+            connection.execute('''CREATE TABLE IF NOT EXISTS account (
+                                  id INTEGER PRIMARY KEY CHECK (id = 1),
+                                  initial_cash TEXT NOT NULL)''')
 
     def completed(self, day: str) -> dict | None:
         """读取指定日期已提交的结果；未运行返回 None。"""
@@ -56,11 +59,33 @@ class PapAccountStore:
                 if cash <= 0:
                     raise ValueError('初始资金按分取整后必须大于零')
                 account = {'date': None, 'cash': str(cash), 'positions': {}}
+                connection.execute('INSERT INTO account VALUES (1, ?)', (str(cash),))
             result = executor.rebalance(signal, account)
             result['signal'] = asdict(signal)
             payload = json.dumps(result, ensure_ascii=False, default=str, allow_nan=False)
             connection.execute('INSERT INTO runs VALUES (?, ?)', (day, payload))
         return json.loads(payload)
+
+    @staticmethod
+    def _restore_initial_cash(runs: list[dict]) -> Decimal:
+        """从旧账本首笔记账的现金流还原开户资金。"""
+        initial_cash = Decimal(runs[0]['cash']) if runs else Decimal('0')
+        if runs:
+            for fill in runs[0]['fills']:
+                amount, fee = Decimal(fill['amount']), Decimal(fill['commission'])
+                initial_cash += amount + fee if fill['side'] == 'buy' else fee - amount
+        return initial_cash
+
+    @classmethod
+    def _initial_cash(cls, connection: sqlite3.Connection, runs: list[dict]) -> Decimal:
+        """读取开户资金；旧账本仅首次读取时从首笔记账反推并补存。"""
+        row = connection.execute('SELECT initial_cash FROM account WHERE id = 1').fetchone()
+        if row:
+            return Decimal(row[0])
+        initial_cash = cls._restore_initial_cash(runs)
+        if runs:
+            connection.execute('INSERT INTO account VALUES (1, ?)', (str(initial_cash),))
+        return initial_cash
 
     def export_csv(self):
         """重建账户交易汇总，每个有成交的日期一行；无成交只保留在 SQLite。
@@ -71,12 +96,7 @@ class PapAccountStore:
         with closing(sqlite3.connect(self.database, timeout=30)) as connection, connection:
             connection.execute('BEGIN IMMEDIATE')
             runs = [json.loads(row[0]) for row in connection.execute('SELECT payload FROM runs ORDER BY day')]
-            # 从首次记账的现金流还原开户资金，兼容原有账本和首次无成交的情况。
-            initial_cash = Decimal(runs[0]['cash']) if runs else Decimal('0')
-            if runs:
-                for fill in runs[0]['fills']:
-                    amount, fee = Decimal(fill['amount']), Decimal(fill['commission'])
-                    initial_cash += amount + fee if fill['side'] == 'buy' else fee - amount
+            initial_cash = self._initial_cash(connection, runs)
             fields = ['date', 'buy_etf', 'buy_quantity', 'buy_price',
                       'sell_etf', 'sell_quantity', 'sell_price', 'commission',
                       'holding_etf', 'holding_quantity', 'holding_price', 'market_value',

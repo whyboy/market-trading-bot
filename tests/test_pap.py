@@ -110,6 +110,8 @@ class PapTests(unittest.TestCase):
 
     def test_summary_skips_no_fills_and_uses_actual_initial_cash(self):
         self.account_store.rebalance(self.signal(weight=0), self.executor, 10000)
+        with sqlite3.connect(self.account_store.database) as connection:
+            self.assertEqual(connection.execute('SELECT initial_cash FROM account').fetchone()[0], '10000.00')
         self.account_store.export_csv()
         self.assertEqual(self.read_trades(), [])
         self.account_store.rebalance(self.signal(day=23), self.executor, 999999)
@@ -130,6 +132,16 @@ class PapTests(unittest.TestCase):
         self.assertEqual(row['cumulative_return_pct'], '-0.050000')
         self.assertEqual(row['net_value'], '0.99950000')
         self.assertIsNotNone(self.account_store.completed('2026-11-24'))
+
+    def test_legacy_initial_cash_is_restored_and_saved_once(self):
+        self.account_store.rebalance(self.signal(), self.executor, 10000)
+        with sqlite3.connect(self.account_store.database) as connection, connection:
+            connection.execute('DELETE FROM account')
+        self.account_store.export_csv()
+        with sqlite3.connect(self.account_store.database) as connection:
+            self.assertEqual(connection.execute('SELECT initial_cash FROM account').fetchone()[0], '10000.00')
+        with patch.object(PapAccountStore, '_restore_initial_cash', side_effect=AssertionError('不应再次反推')):
+            self.account_store.export_csv()
 
     def test_summary_includes_rotation_and_liquidation(self):
         self.account_store.rebalance(self.signal(), self.executor, 10000)

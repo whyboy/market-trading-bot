@@ -1,118 +1,127 @@
 # market-trading-bot
 
-Python 多策略交易项目，先实现 ETF 动量轮动模拟盘，预留实盘执行接口。当前支持行情获取、信号预览和手动模拟调仓，包含账户恢复、事务记账和 CSV 导出；定时任务、收盘日报及推送尚未实现。
+ETF 动量轮动工具，支持实时信号预览和手动模拟调仓。模拟账户使用 SQLite 原子记账，可恢复、可防止同日重复成交，并导出账户交易汇总 CSV。
 
-## 结构
+当前仅实现 `etf_rotation` 策略和 `pap` 模拟模式。定时任务、收盘日报和推送尚未实现。
+
+## 策略简介
+
+目标运行节奏是每个 A 股交易日 **14:30 调仓，15:15 生成并推送收盘日报**；定时任务接入前需手动执行。
+
+策略每天对 ETF 池计算动量和波动率：用最近 24 个交易日收盘价加当前价做回归，以“年化收益 × 拟合优度”作为动量得分，选择得分最高的 ETF；再按“15% 目标年化波动率 ÷ 标的波动率”确定仓位，最高 100%。执行时按调仓前净资产计算目标数量，先卖后买，并应用交易单位、T+1、佣金、滑点和现金约束。
+
+行情无效、过期或数据不足时停止运行，不生成模拟成交。
+
+## 代码结构
 
 ```text
 market-trading-bot/
-├── main.py                         # 程序入口
+├── main.py                         # 命令行入口
 ├── config/
-│   ├── global.json                 # 全局配置：时区、行情源、存储、PushPlus
-│   └── etf_rotation_strategy.json  # 策略参数、运行实例、资金、费用、调度
-├── src/
-│   └── market_trading_bot/
-│       ├── strategies/
-│       │   └── ETFRotationStrategy.py # ETF动量轮动
-│       ├── models.py               # 行情快照、排名与目标持仓
-│       ├── AKShareMarket.py        # 行情适配与交易日历
-│       ├── PapExecutor.py        # 模拟调仓、交易单位、费用与现金约束
-│       ├── StrategyLogger.py       # 策略日志、按日分文件、保留日期清理
-│       ├── PapAccountStore.py          # SQLite事务账本与CSV导出
-│       ├── report.py               # 收益统计、曲线、日报、PushPlus
-│       └── runner.py               # 配置加载、预览及模拟调仓协调
-├── data/                           # 按实例保存运行数据
-├── logs/                           # 按策略和日期保存日志，默认保留30个日期
-├── reports/                        # 按实例保存日报与图片
-├── requirements.txt                # 固定版本依赖
-└── README.md                       # 架构与配置说明
+│   ├── global.json                 # 行情、存储和日志配置
+│   └── etf_rotation_strategy.json  # 策略、实例和交易规则
+├── src/market_trading_bot/
+│   ├── strategies/
+│   │   └── ETFRotationStrategy.py  # ETF 动量轮动策略
+│   ├── AKShareMarket.py            # 行情与交易日历
+│   ├── PapExecutor.py              # 模拟成交
+│   ├── PapAccountStore.py          # SQLite 账本与 CSV 导出
+│   ├── StrategyLogger.py           # 运行日志
+│   ├── models.py                   # 领域数据结构
+│   ├── report.py                   # 预留日报模块
+│   └── runner.py                   # 运行流程协调
+├── tests/                          # 离线测试
+├── data/                           # 各实例账户数据
+├── reports/                        # 预留报告目录
+└── requirements.txt                # Python 依赖
 ```
 
-## 运行边界
+## 快速开始
 
-- 策略只输出目标持仓；执行器负责买卖数量、资金与交易限制检查、委托及成交。订单与成交分别记录，为实盘未成交、部分成交及撤单保留空间。
-- 一个策略配置可声明多个运行实例；实例通过唯一 `id` 与 `mode` 区分模拟盘和实盘，各自维护独立账本。新增策略增加策略模块与JSON配置。
-- 行情缓存可共享；资金、持仓和收益不可跨实例混用。多个策略共用实盘账户的资金分配与订单汇总暂不实现。
-- 每个账户按 `data/<instance_id>/account_trades.csv` 保存交易汇总，仅有实际成交的日期一行；报告按 `reports/<instance_id>/` 保存。权威记录保存在同目录的 `ledger.sqlite3`；账户、信号、订单、成交和完成状态在同一 SQLite 事务内提交。同日唯一键与写事务共同防止并发重复成交，CSV 为可重建的查看副本。
-
-## ETF策略口径
-
-- 计划在A股交易日北京时间14:30调仓、15:15生成收盘日报；当前需手动运行，尚未接入定时任务和收盘估值，不补历史回测。
-- 动量采用24个历史交易日收盘价加当日14:30价格，共25点；沿用原策略加权对数价格回归及年化收益×拟合优度评分。
-- 波动率采用19个历史交易日收盘价加当日14:30价格，共20点、19个对数收益；样本标准差按250日年化。
-- 选择动量第一名，即使全部得分为负；目标仓位为目标波动率÷标的波动率，限制在0至100%，极低波动率时为100%。标的不变也按目标仓位调仓。
-- 默认初始空仓、资金10万元、双边佣金万二、单笔最低5元、零滑点；通过配置调整。成交按盘中行情模拟，份额与可卖数量遵循标的交易限制。
-- 后续日报将展示模拟操作、收盘持仓、当日及累计收益和简单收益曲线。行情失败时不得伪造成交；推送失败不得重新执行交易。
-
-## 配置
-
-在 `config/global.json` 中集中配置行情源与PushPlus Token；仓库中的Token保持为空，真实Token仅在服务器填写，不提交。历史行情使用AKShare东方财富接口，当前报价直接调用东方财富批量接口，图片服务和券商适配待后续确定，`null`表示尚未选择。
-
-策略配置中的 `instances` 支持同策略多实例；第一版仅启用 `pap`。未来增加 `pro` 实例及对应券商执行器。金额、费率、滑点、策略参数和执行时间均使用JSON配置，不使用环境配置文件。
-
-## 手动预览
-
-Python 3.12+，在仓库根目录执行：
+要求 Python 3.12+。
 
 ```bash
 python -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
+```
+
+预览信号，不下单、不写账户：
+
+```bash
 .venv/bin/python main.py
 ```
 
-仅在当前交易时段获取最新报价，不支持指定过去时刻。`--config`可指定策略JSON，路径相对仓库根目录。命令仅输出JSON：行情源、信号时间、各ETF报价及报价时间、历史区间、评分、波动率和目标权重；不下单、不写账户、不生成收益。
-
-- 日线回溯窗口默认60个自然日，可配置；每只仅保留策略需要的最近24个历史收盘价，数据不足则停止。盘中一次批量请求四只ETF的最新价和更新时间，不下载分钟历史；历史准备完毕后再取当前报价，默认最多允许滞后60秒。
-- 交易日历来自新浪，验证日期覆盖和历史交易日连续性；非交易日、非连续交易时段、未来报价、价格无效、历史不足或行情过期均停止，退出码为1。
-- 当前计算一次调用交易日历、四次日线、一次批量报价，共六次接口调用；尚未增加缓存。前复权历史随数据源更新，不提供历史回测。[AKShare接口文档](https://akshare.akfamily.xyz/data/fund/fund_public.html)
-- 免费行情有延迟与限流风险。请求超时和间隔在全局配置中调整；失败直接停止，不自动重试或替换数据源。当前服务器已验证日线、交易日历和四标的单次批量报价。此前连续分钟接口联调出现被库识别为限流的连接异常；改动后的完整交易时段在线预览尚未验证。
-
-## 手动模拟调仓
+执行指定模拟实例并记账：
 
 ```bash
 .venv/bin/python main.py --pap etf_rotation_pap
 ```
 
-仅允许配置中唯一、启用的 `pap` 实例，拒绝 `pro`。首次运行按 `initial_cash` 空仓开户，后续从账本恢复；修改初始资金不会覆盖已有账户。默认命令仍只预览。手动调仓使用运行时行情，当前并不强制在14:30执行。
-
-- 目标份额按调仓前盘中净资产计算，向下取整到配置的 `lot_size`；先卖后买，资金不足会缩减买入数量，未成交部分当次结束，不作为挂单留到下次。无交易也会记录当日已完成。
-- 买价为报价加滑点，卖价减滑点，按0.001元向不利方向取整；佣金取成交额比例与最低佣金的较大值，金额按分四舍五入。输出分别记录订单请求量、实际成交量和拒绝/缩量原因。
-- `instruments` 显式配置交易单位与 `t_plus_one`。默认黄金ETF、纳指ETF支持当日卖出，创业板ETF、上证180ETF买入当日不可卖；下一交易日期运行时解锁历史持仓。当前每天只调仓一次，不支持日内追加调仓。
-- 同一实例同一北京时间日期只提交一次，包括并发调用。已提交时直接返回原结果，不再请求行情；未提交的失败可重试，早于最后记账日期的调仓被拒绝。更换ETF池前必须处理已有持仓，缺少持仓行情时停止。
-- SQLite 是恢复账户的唯一依据，请保留并备份整个实例目录，勿通过编辑 CSV 修改账户。CSV 导出失败时结果返回 `csv_exported=false`，账本仍已提交；重跑可恢复导出，不会再成交。CSV 使用临时文件原子替换，成功后移除旧版自动生成的六类明细 CSV。
-- `account_trades.csv` 使用交易时的盘中估值，未交易日不记录，因此净值只反映交易时点，不是每日收益曲线。模拟成交不验证盘口深度、停牌、涨跌停、分红和拆合份，不代表实盘成交能力；调整份额的公司行为处理留待后续实现。
-
-交易规则参考：[上交所黄金ETF指引](https://www.sse.com.cn/lawandrules/sselawsrules2025/fund/trading/c/c_20250519_10779388.shtml)、[上交所跨境ETF说明](https://edu.sse.com.cn/etfgame/gametopic/c/4940398.shtml)、[深交所场内基金交易指南](https://investor.szse.cn/warning/activities/fundIntroduction/t20210104_584079.html)。新增标的前需核实并配置其交易规则。
-
-### 账户交易汇总
-
-每个账户一个 `account_trades.csv`，按日期排序，仅实际成交时记录，无成交或全部拒单不会新增行。SQLite 仍保存全部运行记录，用于账户恢复和防重复。
-
-| 列 | 含义 |
-|---|---|
-| `date` | 交易日期 |
-| `buy_etf` / `buy_quantity` / `buy_price` | 买入ETF、实际数量、成交价 |
-| `sell_etf` / `sell_quantity` / `sell_price` | 卖出ETF、实际数量、成交价 |
-| `commission` | 当次成交佣金合计 |
-| `holding_etf` / `holding_quantity` / `holding_price` | 交易后持仓ETF、数量、估值价格 |
-| `market_value` / `cash` / `total_assets` | 持仓市值、剩余现金、总资产 |
-| `initial_cash` | 实际开户资金，修改配置不会改变该基准 |
-| `cumulative_pnl` | 总资产减实际开户资金，已包含费用和滑点影响 |
-| `cumulative_return_pct` | 累计收益率，单位为百分比，`1.5` 表示 1.5% |
-| `net_value` | 总资产除以开户资金，初始基准为 1 |
-
-买卖或持仓为空时对应列留空；多笔成交或多只持仓用分号按相同顺序对齐，各笔详情保留在 SQLite。CSV 使用 UTF-8 BOM 编码，便于表格软件打开。绘图可直接使用 `date` 与 `net_value` 或 `total_assets`；横轴缺失日期表示没有成交。当前未支持出入金，未来接入时需要同步调整净值算法。
-
-## 离线验证
+指定其他策略配置：
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python main.py --config config/example.json
 ```
 
-测试使用临时账本和模拟行情，不访问外部行情、不修改正式账户。
+成功时结果以 JSON 输出到 stdout；日志和错误输出到 stderr，失败退出码为 `1`。
+
+## 配置
+
+全局配置位于 `config/global.json`：
+
+| 配置 | 用途 |
+|---|---|
+| `market` | 行情源、请求超时与间隔、报价最大延迟、历史回溯天数 |
+| `storage.data_dir` | SQLite 账本与 CSV 目录 |
+| `logging` | 日志目录、级别和保留日期数 |
+| `pushplus` | 预留配置，当前不发送推送 |
+
+策略配置位于 `config/etf_rotation_strategy.json`：
+
+| 配置 | 默认值 | 用途 |
+|---|---|---|
+| `strategy` | `etf_rotation` | 策略类型 |
+| `instances` | `etf_rotation_pap`；开户资金 100,000 元；佣金率 0.02%；最低佣金 5 元；滑点 0 | 模拟账户与交易费用 |
+| `parameters.etf_pool` | `518880.XSHG`、`513100.XSHG`、`159915.XSHE`、`510180.XSHG` | ETF 池 |
+| `parameters.momentum_price_points` | `25` | 动量价格点数量 |
+| `parameters.volatility_price_points` | `20` | 波动率价格点数量 |
+| `parameters.target_annual_volatility` | `0.15` | 目标年化波动率 15% |
+| `parameters.annualization_days` | `250` | 年化交易日数量 |
+| `parameters.select_num` | `1` | 选择排名第一的 ETF |
+| `instruments` | 每手 100 份；黄金 ETF、纳指 ETF 为 T+0，创业板 ETF、上证 180 ETF 为 T+1 | 交易单位和卖出规则 |
+| `schedule.trade_time` | `14:30` | 调仓时间，当前需手动执行 |
+| `schedule.report_time` | `15:15` | 收盘日报时间，当前尚未实现 |
+
+`initial_cash` 仅在首次开户时使用并保存到账本；后续修改配置不会改变账户基准。PushPlus Token 等凭据不要提交到仓库。
+
+## 账户数据
+
+每个实例的数据保存在 `data/<instance_id>/`：
+
+- `ledger.sqlite3`：权威账本，保存全部运行结果、账户状态、信号、订单和成交。
+- `account_trades.csv`：可重建的查看副本，仅记录发生实际成交的日期。
+
+账户更新和当日运行结果在同一 SQLite 事务中提交。同一实例同一北京时间日期只提交一次；并发或重复运行会返回首次结果。CSV 导出失败不会回滚已提交账本，再次运行可补齐导出。
+
+请备份整个实例目录，不要通过修改 CSV 调整账户。更换 ETF 池前必须先处理已有持仓，否则缺少持仓行情时运行会停止。
+
+### CSV 字段
+
+| 字段 | 含义 |
+|---|---|
+| `date` | 交易日期 |
+| `buy_etf` / `buy_quantity` / `buy_price` | 买入标的、实际数量和成交价 |
+| `sell_etf` / `sell_quantity` / `sell_price` | 卖出标的、实际数量和成交价 |
+| `commission` | 当次佣金合计 |
+| `holding_etf` / `holding_quantity` / `holding_price` | 交易后持仓、数量和估值价 |
+| `market_value` / `cash` / `total_assets` | 持仓市值、现金和总资产 |
+| `initial_cash` | 实际开户资金 |
+| `cumulative_pnl` | 总资产减开户资金 |
+| `cumulative_return_pct` | 累计收益率，单位为百分比 |
+| `net_value` | 总资产除以开户资金 |
+
+多笔成交或持仓使用分号按顺序对齐。CSV 的资产值采用调仓时估值，且不记录无成交日期，因此不是每日净值曲线。完整明细以 SQLite 为准。
 
 ## 日志
 
-终端日志输出到stderr，JSON预览结果输出到stdout；文件写入 `logs/<strategy>/YYYY-MM-DD.log`，日期与时间均使用北京时间。同日追加、跨日自动切换文件，每个策略最多保留最近30个有日志的日期（不是30个交易日或固定30个自然日）；首次写入及跨日时清理旧文件。
-
-全局 `logging` 配置控制目录、`retention_dates` 和级别。日志记录运行开始/成功/异常堆栈、行情返回条数与使用区间、各ETF报价及更新时间、排名/评分/波动率/目标仓位和是否执行买卖。预览记录 `executed=false`；模拟调仓记录实例、记账日期、成交笔数和现金，具体订单与成交可查看账本或 CSV。日志不提交Git，不记录Token或整份配置。
+日志写入 `logs/<strategy>/YYYY-MM-DD.log`，默认保留最近 30 个有日志的日期。日志包含运行状态、行情区间、报价、策略排名、目标权重和模拟成交摘要，不记录 Token。
