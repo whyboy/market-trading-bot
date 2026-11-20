@@ -1,0 +1,33 @@
+{
+  "strategy": "etf_rotation",
+  "instances": [
+    {
+      "id": "etf_rotation_pap",
+      "mode": "pap",
+      "enabled": true,
+      "initial_cash": 100000,
+      "execution": {
+        "commission_rate": 0.0002,
+        "minimum_commission": 5,
+        "slippage_rate": 0.0
+      }
+    }
+  ],
+  "parameters": {
+    "etf_pool": [
+      "518880.XSHG",
+      "513100.XSHG",
+      "159915.XSHE",
+      "510180.XSHG"
+    ],
+    "momentum_price_points": 25,
+    "volatility_price_points": 20,
+    "target_annual_volatility": 0.15,
+    "annualization_days": 250,
+    "select_num": 1
+  },
+  "schedule": {
+    "trade_time": "14:30",
+    "report_time": "15:15"
+  }
+}
