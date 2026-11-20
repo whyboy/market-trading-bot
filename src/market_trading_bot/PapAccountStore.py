@@ -32,9 +32,12 @@ class PapAccountStore:
         return json.loads(row[0]) if row else None
 
     def rebalance(self, signal: StrategyResult, executor: PapExecutor, initial_cash: float) -> dict:
-        """在单个事务内恢复账户、模拟调仓和提交完整结果；异常自动回滚。
+        """恢复账户并在同一事务中提交调仓结果；失败回滚，同日重跑返回首次结果。
 
-        :return: 已提交结果；同日重跑直接返回首次结果。
+        :param signal: 本次策略信号，日期用于同日去重。
+        :param executor: 根据目标仓位计算订单、成交及新账户的模拟执行器。
+        :param initial_cash: 仅首次开户使用，按分取整后须大于零。
+        :return: 已提交的账户、订单、成交和信号。
         """
         day = signal.as_of.date().isoformat()
         with closing(sqlite3.connect(self.database, timeout=30)) as connection, connection:
@@ -47,8 +50,8 @@ class PapAccountStore:
                 account = json.loads(previous[0])
             else:
                 cash = Decimal(str(initial_cash))
-                if not cash.is_finite() or cash <= 0:
-                    raise ValueError('初始资金必须为正有限数')
+                if not cash.is_finite():
+                    raise ValueError('初始资金必须为有限数')
                 cash = executor.money(cash)
                 if cash <= 0:
                     raise ValueError('初始资金按分取整后必须大于零')

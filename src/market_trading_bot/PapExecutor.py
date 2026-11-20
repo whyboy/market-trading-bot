@@ -25,15 +25,15 @@ class PapExecutor:
         return value.quantize(Decimal('.01'), rounding=ROUND_HALF_UP)
 
     def commission(self, amount: Decimal) -> Decimal:
-        """单笔佣金取比例费用与最低费用的较大值。"""
+        """取比例佣金与最低佣金的较大值，再按分四舍五入。"""
         return self.money(max(amount * self.rate, self.minimum))
 
     def rebalance(self, signal: StrategyResult, account: dict) -> dict:
         """按调仓前净资产计算目标份额，返回新账户与订单、成交，不修改输入。
 
-        :param signal: 已校验行情生成的策略结果，须覆盖所有持仓标的。
-        :param account: 上次记账日期、现金字符串及持仓数量/可卖数量。
-        :return: 可直接持久化的账户、订单、成交和盘中估值。
+        :param signal: 行情层已校验价格有效性的策略结果，须覆盖所有持仓标的。
+        :param account: 上次记账日期、现金及持仓；跨日后历史持仓全部可卖。
+        :return: 新账户、订单、成交及盘中估值；不修改传入账户。
         """
         day = signal.as_of.date().isoformat()
         if account['date'] and day <= account['date']:
@@ -44,8 +44,6 @@ class PapExecutor:
         weights = signal.target_weights
         if set(prices) != set(weights) or not set(positions) <= set(prices):
             raise ValueError('行情和目标权重必须覆盖所有持仓标的')
-        if any(not price.is_finite() or price <= 0 for price in prices.values()):
-            raise ValueError('成交价格必须为正有限数')
         if any(not math.isfinite(weight) or not 0 <= weight <= 1 for weight in weights.values()) or sum(weights.values()) > 1 + 1e-12:
             raise ValueError('目标权重必须非负且合计不超过1')
         for position in positions.values():

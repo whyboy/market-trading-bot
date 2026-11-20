@@ -26,7 +26,9 @@ def preview_signals(root: Path, strategy_path: Path) -> dict:
 def run_pap(root: Path, strategy_path: Path, instance_id: str) -> dict:
     """为启用的 pap 实例模拟调仓；同一北京时间日期只提交一次。
 
-    :param instance_id: 策略配置中的实例 ID，不允许实盘或禁用实例。
+    :param root: 仓库根目录，用于定位全局配置、日志和账户目录。
+    :param strategy_path: 策略 JSON 文件路径。
+    :param instance_id: 策略配置中唯一、启用的 pap 实例 ID。
     :return: 已提交账户、订单、成交及 CSV 导出状态。
     """
     return _run(root, strategy_path, instance_id)
