@@ -1,4 +1,4 @@
-"""纯内存模拟调仓；账户持久化由 PapLedger 负责。"""
+"""纯内存模拟调仓；账户持久化由 PapAccountStore 负责。"""
 import math
 from .models import StrategyResult
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP

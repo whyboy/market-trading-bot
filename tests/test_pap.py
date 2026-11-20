@@ -7,8 +7,8 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 from decimal import Decimal
 from market_trading_bot.models import RankedETF, StrategyResult
+from market_trading_bot.PapAccountStore import PapAccountStore
 from market_trading_bot.PapExecutor import PapExecutor
-from market_trading_bot.PapLedger import PapLedger
 from market_trading_bot.runner import run_pap
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -25,7 +25,7 @@ class PapTests(unittest.TestCase):
                       'B': {'lot_size': 100, 't_plus_one': False}}
         self.executor = PapExecutor({'commission_rate': .0002, 'minimum_commission': 5,
                                        'slippage_rate': 0}, self.rules)
-        self.ledger = PapLedger(self.root, 'pap')
+        self.account_store = PapAccountStore(self.root, 'pap')
 
     def signal(self, day=20, winner='A', weight=1, prices=(10, 20)):
         now = datetime(2026, 11, day, 14, 30, tzinfo=ZoneInfo('Asia/Shanghai'))
@@ -34,7 +34,7 @@ class PapTests(unittest.TestCase):
         return StrategyResult(now, ranking, {symbol: weight if symbol == winner else 0 for symbol in self.rules})
 
     def test_commission_lot_size_and_conservation(self):
-        result = self.ledger.rebalance(self.signal(), self.executor, 10000)
+        result = self.account_store.rebalance(self.signal(), self.executor, 10000)
         self.assertEqual(result['positions']['A'], {'quantity': 900, 'sellable': 0})
         self.assertEqual(result['cash'], '995.00')
         self.assertEqual(Decimal(result['cash']) + 900 * Decimal('10'), Decimal('10000') - Decimal('5'))
@@ -42,8 +42,8 @@ class PapTests(unittest.TestCase):
         self.assertEqual(result['orders'][0]['reason'], 'cash_limit')
 
     def test_restore_sell_before_buy_and_t_plus_zero(self):
-        self.ledger.rebalance(self.signal(), self.executor, 10000)
-        restored = PapLedger(self.root, 'pap')
+        self.account_store.rebalance(self.signal(), self.executor, 10000)
+        restored = PapAccountStore(self.root, 'pap')
         result = restored.rebalance(self.signal(day=23, winner='B'), self.executor, 999999)
         self.assertEqual([fill['side'] for fill in result['fills']], ['sell', 'buy'])
         self.assertNotIn('A', result['positions'])
@@ -53,29 +53,29 @@ class PapTests(unittest.TestCase):
 
     def test_proportional_commission_and_sell_slippage(self):
         self.executor.rate = Decimal('.01')
-        first = self.ledger.rebalance(self.signal(), self.executor, 10000)
+        first = self.account_store.rebalance(self.signal(), self.executor, 10000)
         self.assertEqual(first['fills'][0]['commission'], '90.00')
         self.executor.slippage = Decimal('.01')
-        second = self.ledger.rebalance(self.signal(day=23, weight=0), self.executor, 10000)
+        second = self.account_store.rebalance(self.signal(day=23, weight=0), self.executor, 10000)
         self.assertEqual(second['fills'][0]['price'], '9.900')
         self.assertEqual(second['fills'][0]['commission'], '89.10')
         self.assertEqual(second['cash'], '9730.90')
 
     def test_same_symbol_is_rebalanced_and_zero_target_liquidates(self):
-        self.ledger.rebalance(self.signal(), self.executor, 10000)
-        result = self.ledger.rebalance(self.signal(day=23, weight=.5), self.executor, 10000)
+        self.account_store.rebalance(self.signal(), self.executor, 10000)
+        result = self.account_store.rebalance(self.signal(day=23, weight=.5), self.executor, 10000)
         self.assertEqual(result['positions']['A']['quantity'], 400)
         self.assertEqual(result['fills'][0]['quantity'], 500)
-        result = self.ledger.rebalance(self.signal(day=24, weight=0), self.executor, 10000)
+        result = self.account_store.rebalance(self.signal(day=24, weight=0), self.executor, 10000)
         self.assertEqual(result['positions'], {})
         self.assertEqual(result['cash'], '9985.00')
 
     def test_concurrent_retry_does_not_duplicate_fills(self):
         with ThreadPoolExecutor(max_workers=4) as pool:
-            results = list(pool.map(lambda _: self.ledger.rebalance(self.signal(), self.executor, 10000), range(8)))
+            results = list(pool.map(lambda _: self.account_store.rebalance(self.signal(), self.executor, 10000), range(8)))
         self.assertTrue(all(result == results[0] for result in results))
-        self.ledger.export_csv()
-        with (self.ledger.directory / 'fills.csv').open() as stream:
+        self.account_store.export_csv()
+        with (self.account_store.directory / 'fills.csv').open() as stream:
             self.assertEqual(len(list(csv.DictReader(stream))), 1)
 
     def test_failure_rolls_back_and_can_retry(self):
@@ -83,28 +83,28 @@ class PapTests(unittest.TestCase):
         broken.rebalance.side_effect = RuntimeError('interrupted')
         broken.money = self.executor.money
         with self.assertRaises(RuntimeError):
-            self.ledger.rebalance(self.signal(), broken, 10000)
-        self.assertIsNone(self.ledger.completed('2026-11-20'))
-        self.assertEqual(len(self.ledger.rebalance(self.signal(), self.executor, 10000)['fills']), 1)
+            self.account_store.rebalance(self.signal(), broken, 10000)
+        self.assertIsNone(self.account_store.completed('2026-11-20'))
+        self.assertEqual(len(self.account_store.rebalance(self.signal(), self.executor, 10000)['fills']), 1)
 
     def test_failed_insert_rolls_back(self):
         broken_signal = self.signal()
         broken_signal = replace(broken_signal, ranking=(replace(broken_signal.ranking[0], score=float('nan')), *broken_signal.ranking[1:]))
         with self.assertRaises(ValueError):
-            self.ledger.rebalance(broken_signal, self.executor, 10000)
-        self.assertIsNone(self.ledger.completed('2026-11-20'))
+            self.account_store.rebalance(broken_signal, self.executor, 10000)
+        self.assertIsNone(self.account_store.completed('2026-11-20'))
 
     def test_exports_can_be_rebuilt_and_instances_are_isolated(self):
-        self.ledger.rebalance(self.signal(), self.executor, 10000)
-        self.ledger.export_csv()
-        (self.ledger.directory / 'fills.csv').write_text('broken')
-        self.ledger.export_csv()
-        with (self.ledger.directory / 'fills.csv').open() as stream:
+        self.account_store.rebalance(self.signal(), self.executor, 10000)
+        self.account_store.export_csv()
+        (self.account_store.directory / 'fills.csv').write_text('broken')
+        self.account_store.export_csv()
+        with (self.account_store.directory / 'fills.csv').open() as stream:
             self.assertEqual(next(csv.DictReader(stream))['quantity'], '900')
-        self.assertIsNone(PapLedger(self.root, 'other').completed('2026-11-20'))
+        self.assertIsNone(PapAccountStore(self.root, 'other').completed('2026-11-20'))
 
     def test_insufficient_cash_and_slippage(self):
-        result = self.ledger.rebalance(self.signal(), self.executor, 1000)
+        result = self.account_store.rebalance(self.signal(), self.executor, 1000)
         self.assertEqual(result['fills'], [])
         self.assertEqual(result['cash'], '1000.00')
         self.executor.slippage = Decimal('.01')
@@ -113,9 +113,9 @@ class PapTests(unittest.TestCase):
         self.assertEqual(result['cash'], '905.00')
 
     def test_missing_held_symbol_and_backdated_run_are_rejected(self):
-        self.ledger.rebalance(self.signal(day=23), self.executor, 10000)
+        self.account_store.rebalance(self.signal(day=23), self.executor, 10000)
         with self.assertRaises(ValueError):
-            self.ledger.rebalance(self.signal(), self.executor, 10000)
+            self.account_store.rebalance(self.signal(), self.executor, 10000)
         account = {'date': '2026-11-19', 'cash': '1000', 'positions': {'C': {'quantity': 100, 'sellable': 100}}}
         with self.assertRaises(ValueError):
             self.executor.rebalance(self.signal(), account)
@@ -136,7 +136,7 @@ class PapTests(unittest.TestCase):
             clock.now.return_value = self.signal().as_of
             strategy.return_value.calculate.return_value = self.signal()
             market.return_value.load.return_value = self.signal().as_of, {}
-            with patch.object(PapLedger, 'export_csv', side_effect=OSError('disk full')):
+            with patch.object(PapAccountStore, 'export_csv', side_effect=OSError('disk full')):
                 first = run_pap(self.root, path, 'pap')
             self.assertFalse(first['csv_exported'])
             market.reset_mock()

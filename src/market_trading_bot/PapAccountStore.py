@@ -12,7 +12,7 @@ from decimal import Decimal
 from pathlib import Path
 
 
-class PapLedger:
+class PapAccountStore:
     """按实例保存完整调仓快照，同日唯一约束防止并发及重跑重复成交。"""
 
     def __init__(self, directory: Path, instance_id: str):

@@ -18,7 +18,7 @@ market-trading-bot/
 │       ├── AKShareMarket.py        # 行情适配与交易日历
 │       ├── PapExecutor.py        # 模拟调仓、交易单位、费用与现金约束
 │       ├── StrategyLogger.py       # 策略日志、按日分文件、保留日期清理
-│       ├── PapLedger.py          # SQLite事务账本与CSV导出
+│       ├── PapAccountStore.py          # SQLite事务账本与CSV导出
 │       ├── report.py               # 收益统计、曲线、日报、PushPlus
 │       └── runner.py               # 配置加载、预览及模拟调仓协调
 ├── data/                           # 按实例保存运行数据
