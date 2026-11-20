@@ -13,7 +13,6 @@ market-trading-bot/
 ├── src/
 │   └── market_trading_bot/
 │       ├── strategies/
-│       │   ├── Strategy.py         # 策略接口：行情与账户快照 → 目标持仓
 │       │   └── ETFRotationStrategy.py # ETF动量轮动
 │       ├── models.py               # 账户、目标持仓、订单、成交等公共结构
 │       ├── AKShareMarket.py        # 行情适配与交易日历
