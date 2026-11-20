@@ -1,7 +1,7 @@
 """手动计算信号；后续在此接入调度、执行和落盘。"""
 import json
-from .market import AKShareMarket
-from .strategies.etf_rotation import ETFRotationStrategy
+from .AKShareMarket import AKShareMarket
+from .strategies.ETFRotationStrategy import ETFRotationStrategy
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
