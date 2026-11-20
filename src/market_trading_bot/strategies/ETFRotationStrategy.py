@@ -40,25 +40,18 @@ class ETFRotationStrategy:
         得分为年化回归收益乘 R²；全部为负仍选最高分，同分按 ETF 池顺序。
         仓位上限为 100%，年化波动率低于 1e-6 时满仓，其余标的权重为零。
 
-        :param snapshots: 各标的行情；历史日期须递增且早于 as_of 当日。
+        :param snapshots: 经行情层校验的快照，价格有效、历史连续且报价未过期。
         :param as_of: 本次计算时刻，须与报价使用相同的时区口径。
         :return: 计算时刻、按得分降序的排名和目标权重（0 至 1）。
         :raises KeyError: 缺少 ETF 池中的标的。
-        :raises ValueError: 历史不足、日期或价格无效，或计算结果非有限数。
+        :raises ValueError: 历史不足或计算结果非有限数。
         """
         ranking = []
         for symbol in self.symbols:
             snapshot = snapshots[symbol]
             if len(snapshot.history) < self.history_points:
                 raise ValueError(f'{symbol}: 历史价格不足')
-            dates = [bar.date for bar in snapshot.history]
-            if dates != sorted(set(dates)) or any(day >= as_of.date() for day in dates):
-                raise ValueError(f'{symbol}: 历史价格日期重复、乱序或包含当日/未来数据')
-            if snapshot.quote_time.date() != as_of.date() or snapshot.quote_time > as_of:
-                raise ValueError(f'{symbol}: 行情时间不匹配')
             prices = np.array([bar.close for bar in snapshot.history] + [snapshot.price], dtype=float)
-            if not np.all(np.isfinite(prices)) or np.any(prices <= 0):
-                raise ValueError(f'{symbol}: 价格必须为正有限数')
             y = np.log(prices[-self.momentum_points:])
             x = np.arange(len(y))
             weights = np.linspace(1, 2, len(y))

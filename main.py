@@ -13,9 +13,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description='ETF策略信号预览（不交易）')
     parser.add_argument('--config', default='config/etf_rotation_strategy.json', help='策略JSON路径，相对仓库根目录')
     args = parser.parse_args()
-    from market_trading_bot.runner import preview
+    from market_trading_bot.runner import preview_signals
     try:
-        result = preview(ROOT, ROOT / args.config)
+        result = preview_signals(ROOT, ROOT / args.config)
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str, allow_nan=False))
         return 0
     except Exception as exc:

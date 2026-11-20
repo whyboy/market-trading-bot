@@ -33,15 +33,14 @@ class AKShareMarket:
             raise ValueError('当前仅支持akshare_eastmoney行情源')
         self.max_age = int(settings['max_quote_age_seconds'])
         self.lookback_days = int(settings['history_lookback_days'])
-        timeout = float(settings['request_timeout_seconds'])
-        self.timeout = timeout
+        self.timeout = float(settings['request_timeout_seconds'])
         self.interval = float(settings['request_interval_seconds'])
         self.last_request = 0.0
         if not math.isfinite(self.interval) or self.interval < 0:
             raise ValueError('请求间隔必须为非负有限数')
-        if not math.isfinite(timeout) or min(self.max_age, self.lookback_days, timeout) <= 0:
+        if not math.isfinite(self.timeout) or min(self.max_age, self.lookback_days, self.timeout) <= 0:
             raise ValueError('行情超时、时效和回溯天数必须为正数')
-        ak_config.timeout = timeout
+        ak_config.timeout = self.timeout
 
     def _request(self, function, **kwargs):
         """按配置限制请求开始时间的间隔，透传参数、结果和异常。"""
@@ -51,20 +50,13 @@ class AKShareMarket:
         self.last_request = clock.monotonic()
         return function(**kwargs)
 
-    def _quotes(self, symbols: tuple[str, ...]) -> dict:
+    def _quotes(self, secids: dict[str, str]) -> dict[str, tuple[float, datetime]]:
         """批量获取当前报价，要求每个标的恰好返回一条。
 
-        :param symbols: 六位代码加 .XSHG 或 .XSHE 后缀的标的集合。
+        :param secids: 东方财富市场代码到项目标的代码的映射。
         :return: 标的到（未复权价格、北京时间报价时间）的映射。
-        :raises MarketDataError: 代码无效或返回数据错误、缺失、重复。
+        :raises MarketDataError: 返回数据错误、缺失或重复。
         """
-        secids = {}
-        for symbol in symbols:
-            match = re.fullmatch(r'(\d{6})\.(XSHG|XSHE)', symbol)
-            if not match:
-                raise MarketDataError(f'不支持的证券代码: {symbol}')
-            market_id = '1' if match.group(2) == 'XSHG' else '0'
-            secids[f'{market_id}.{match.group(1)}'] = symbol
         response = self._request(
             requests.get, url='https://push2.eastmoney.com/api/qt/ulist.np/get',
             params={'secids': ','.join(secids), 'fields': 'f2,f12,f13,f124', 'fltt': '2'},
@@ -101,6 +93,13 @@ class AKShareMarket:
         self.logger.info('行情获取开始 provider=akshare_eastmoney symbols=%s', ','.join(symbols))
         try:
             self._check_session(started)
+            secids = {}
+            for symbol in symbols:
+                match = re.fullmatch(r'(\d{6})\.(XSHG|XSHE)', symbol)
+                if not match:
+                    raise MarketDataError(f'不支持的证券代码: {symbol}')
+                market_id = '1' if match.group(2) == 'XSHG' else '0'
+                secids[f'{market_id}.{match.group(1)}'] = symbol
             calendar = sorted(set(self._request(ak.calendar_trade_date_hist_sina)['trade_date']))
             if not calendar or not calendar[0] <= started.date() <= calendar[-1]:
                 raise MarketDataError('交易日历未覆盖当前日期')
@@ -110,14 +109,12 @@ class AKShareMarket:
             expected = [day for day in calendar if day < started.date()][-history_points:]
             if len(expected) != history_points:
                 raise MarketDataError('交易日历历史不足')
+            start = (started.date() - timedelta(days=self.lookback_days)).strftime('%Y%m%d')
+            end = (started.date() - timedelta(days=1)).strftime('%Y%m%d')
             histories = {}
             for symbol in symbols:
-                if not re.fullmatch(r'\d{6}\.(XSHG|XSHE)', symbol):
-                    raise MarketDataError(f'不支持的证券代码: {symbol}')
-                start = started.date() - timedelta(days=self.lookback_days)
                 daily = self._request(ak.fund_etf_hist_em,
-                    symbol=symbol.split('.')[0], period='daily', start_date=start.strftime('%Y%m%d'),
-                    end_date=(started.date() - timedelta(days=1)).strftime('%Y%m%d'), adjust='qfq')
+                    symbol=symbol.split('.')[0], period='daily', start_date=start, end_date=end, adjust='qfq')
                 self.logger.info('历史日线获取结果 symbol=%s rows=%d window_days=%d', symbol, len(daily), self.lookback_days)
                 if daily.empty:
                     raise MarketDataError(f'{symbol}: 无历史行情')
@@ -133,7 +130,7 @@ class AKShareMarket:
                 histories[symbol] = tuple(DailyClose(row.day, float(row.收盘)) for row in daily.itertuples())
             # 历史数据准备完毕后再批量取价，避免各标的分别请求产生较大时间差。
             self.logger.info('批量当前报价请求开始 count=%d', len(symbols))
-            quotes = self._quotes(symbols)
+            quotes = self._quotes(secids)
             as_of = datetime.now(SHANGHAI)
             self._check_session(as_of)
             if as_of.date() != started.date():

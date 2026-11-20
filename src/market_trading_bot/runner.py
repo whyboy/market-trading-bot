@@ -7,7 +7,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 
-def preview(root: Path, strategy_path: Path) -> dict:
+def preview_signals(root: Path, strategy_path: Path) -> dict:
     """加载配置和行情，计算目标仓位并记录日志，仅预览信号。
 
     :param root: 仓库根目录，用于定位全局配置和日志目录。
