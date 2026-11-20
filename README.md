@@ -5,22 +5,26 @@ Python 多策略交易项目，先实现 ETF 动量轮动模拟盘，预留实�
 ## 结构
 
 ```text
-main.py                          程序入口
-config/
-  global.example.json            全局配置模板：时区、行情源、存储、PushPlus
-  etf_rotation_strategy.json     策略参数、运行实例、资金、费用、调度
-src/market_trading_bot/
-  strategies/base.py             策略接口：行情与账户快照 → 目标持仓
-  strategies/etf_rotation.py     ETF动量轮动
-  models.py                      账户、目标持仓、订单、成交等公共结构
-  market.py                      行情适配与交易日历
-  execution.py                   仓位转订单、交易检查、模拟执行及未来券商接口
-  storage.py                     CSV存储
-  report.py                      收益统计、曲线、日报、PushPlus
-  runner.py                      配置加载、定时调度、流程协调、防重复执行
-data/                            按实例保存运行数据
-reports/                         按实例保存日报与图片
-requirements.txt                 依赖清单，功能实现时补充
+market-trading-bot/
+├── main.py                         # 程序入口
+├── config/
+│   ├── global.example.json         # 全局配置模板：时区、行情源、存储、PushPlus
+│   └── etf_rotation_strategy.json  # 策略参数、运行实例、资金、费用、调度
+├── src/
+│   └── market_trading_bot/
+│       ├── strategies/
+│       │   ├── base.py             # 策略接口：行情与账户快照 → 目标持仓
+│       │   └── etf_rotation.py     # ETF动量轮动
+│       ├── models.py               # 账户、目标持仓、订单、成交等公共结构
+│       ├── market.py               # 行情适配与交易日历
+│       ├── execution.py            # 仓位转订单、交易检查、模拟执行及未来券商接口
+│       ├── storage.py              # CSV存储
+│       ├── report.py               # 收益统计、曲线、日报、PushPlus
+│       └── runner.py               # 配置加载、定时调度、流程协调、防重复执行
+├── data/                           # 按实例保存运行数据
+├── reports/                        # 按实例保存日报与图片
+├── requirements.txt                # 依赖清单，功能实现时补充
+└── README.md                       # 架构与配置说明
 ```
 
 ## 运行边界
