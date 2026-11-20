@@ -4,6 +4,30 @@ ETF 动量轮动工具，支持实时信号预览和手动模拟调仓。模拟�
 
 当前仅实现 `etf_rotation` 策略和 `pap` 模拟模式。定时任务、实盘执行、收盘日报、推送及历史回测尚未实现。
 
+## 代码结构
+
+```text
+market-trading-bot/
+├── main.py                         # 命令行入口
+├── config/
+│   ├── global.json                 # 行情、存储和日志配置
+│   └── etf_rotation_strategy.json  # 策略、实例和交易规则
+├── src/market_trading_bot/
+│   ├── strategies/
+│   │   └── ETFRotationStrategy.py  # ETF 动量轮动策略
+│   ├── AKShareMarket.py            # 行情与交易日历
+│   ├── PapExecutor.py              # 模拟成交
+│   ├── PapAccountStore.py          # SQLite 账本与 CSV 导出
+│   ├── StrategyLogger.py           # 运行日志
+│   ├── models.py                   # 领域数据结构
+│   ├── report.py                   # 预留日报模块
+│   └── runner.py                   # 运行流程协调
+├── tests/                          # 离线测试
+├── data/                           # 各实例账户数据
+├── reports/                        # 预留报告目录
+└── requirements.txt                # Python 依赖
+```
+
 ## 快速开始
 
 要求 Python 3.12+。
