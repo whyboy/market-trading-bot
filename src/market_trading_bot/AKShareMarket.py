@@ -1,5 +1,6 @@
 """AKShare适配：东财前复权日线、批量当前报价、上海市场交易日历。"""
 import akshare as ak
+import logging
 import math
 import pandas as pd
 import re
@@ -18,7 +19,8 @@ class MarketDataError(RuntimeError):
 
 
 class AKShareMarket:
-    def __init__(self, settings: dict):
+    def __init__(self, settings: dict, logger: logging.Logger | None = None):
+        self.logger = logger or logging.getLogger(__name__)
         if settings['provider'] != 'akshare_eastmoney':
             raise ValueError('当前仅支持akshare_eastmoney行情源')
         self.max_age = int(settings['max_quote_age_seconds'])
@@ -73,13 +75,15 @@ class AKShareMarket:
 
     def load(self, symbols: tuple[str, ...], history_points: int) -> tuple[datetime, dict[str, MarketSnapshot]]:
         started = datetime.now(SHANGHAI)
-        self._check_session(started)
+        self.logger.info('行情获取开始 provider=akshare_eastmoney symbols=%s', ','.join(symbols))
         try:
+            self._check_session(started)
             calendar = sorted(set(self._request(ak.calendar_trade_date_hist_sina)['trade_date']))
             if not calendar or not calendar[0] <= started.date() <= calendar[-1]:
                 raise MarketDataError('交易日历未覆盖当前日期')
             if started.date() not in calendar:
                 raise MarketDataError(f'{started.date()}: 非A股交易日')
+            self.logger.info('交易日历获取成功 date=%s coverage=%s~%s', started.date(), calendar[0], calendar[-1])
             expected = [day for day in calendar if day < started.date()][-history_points:]
             if len(expected) != history_points:
                 raise MarketDataError('交易日历历史不足')
@@ -91,6 +95,7 @@ class AKShareMarket:
                 daily = self._request(ak.fund_etf_hist_em,
                     symbol=symbol.split('.')[0], period='daily', start_date=start.strftime('%Y%m%d'),
                     end_date=(started.date() - timedelta(days=1)).strftime('%Y%m%d'), adjust='qfq')
+                self.logger.info('历史日线获取结果 symbol=%s rows=%d window_days=%d', symbol, len(daily), self.lookback_days)
                 if daily.empty:
                     raise MarketDataError(f'{symbol}: 无历史行情')
                 dates = pd.to_datetime(daily['日期'], errors='raise').dt.date
@@ -101,8 +106,10 @@ class AKShareMarket:
                 daily = daily.tail(history_points)
                 if daily['day'].tolist() != expected:
                     raise MarketDataError(f'{symbol}: 历史行情不足或缺少交易日，请检查回溯窗口及数据源')
+                self.logger.info('历史日线校验成功 symbol=%s used=%d start=%s end=%s', symbol, len(daily), daily.iloc[0]['day'], daily.iloc[-1]['day'])
                 histories[symbol] = tuple(DailyClose(row.day, float(row.收盘)) for row in daily.itertuples())
             # 历史数据准备完毕后再批量取价，避免各标的分别请求产生较大时间差。
+            self.logger.info('批量当前报价请求开始 count=%d', len(symbols))
             quotes = self._quotes(symbols)
             as_of = datetime.now(SHANGHAI)
             self._check_session(as_of)
@@ -111,6 +118,7 @@ class AKShareMarket:
             snapshots = {}
             for symbol in symbols:
                 price, stamp = quotes[symbol]
+                self.logger.info('当前报价获取结果 symbol=%s price=%s quote_time=%s', symbol, price, stamp.isoformat())
                 age = (as_of - stamp).total_seconds()
                 if stamp.date() != as_of.date() or not 0 <= age <= self.max_age:
                     raise MarketDataError(f'{symbol}: 报价过期或来自未来，更新时间为{stamp.isoformat()}')
@@ -118,8 +126,11 @@ class AKShareMarket:
                 if any(not math.isfinite(p) or p <= 0 for p in [price, *(bar.close for bar in history)]):
                     raise MarketDataError(f'{symbol}: 价格无效')
                 snapshots[symbol] = MarketSnapshot(symbol, stamp, price, history)
+            self.logger.info('行情获取成功 count=%d as_of=%s', len(snapshots), as_of.isoformat())
             return as_of, snapshots
-        except MarketDataError:
+        except MarketDataError as exc:
+            self.logger.error('行情获取失败: %s', exc)
             raise
         except Exception as exc:
+            self.logger.error('行情接口请求或解析失败: %s', exc)
             raise MarketDataError(f'行情获取失败: {exc}') from exc

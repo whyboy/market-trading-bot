@@ -15,5 +15,10 @@
     "enabled": false,
     "token": "",
     "image_provider": null
+  },
+  "logging": {
+    "directory": "logs",
+    "retention_dates": 30,
+    "level": "INFO"
   }
 }
