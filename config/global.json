@@ -1,7 +1,11 @@
 {
   "timezone": "Asia/Shanghai",
   "market": {
-    "provider": null
+    "provider": "akshare_eastmoney",
+    "request_timeout_seconds": 15,
+    "request_interval_seconds": 2,
+    "max_quote_age_seconds": 60,
+    "history_lookback_days": 120
   },
   "storage": {
     "data_dir": "data",
