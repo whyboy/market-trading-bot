@@ -1,7 +1,11 @@
 {
   "timezone": "Asia/Shanghai",
   "market": {
-    "provider": null
+    "provider": "akshare_eastmoney",
+    "request_timeout_seconds": 15,
+    "request_interval_seconds": 2,
+    "max_quote_age_seconds": 60,
+    "history_lookback_days": 60
   },
   "storage": {
     "data_dir": "data",
@@ -11,5 +15,10 @@
     "enabled": false,
     "token": "",
     "image_provider": null
+  },
+  "logging": {
+    "directory": "logs",
+    "retention_dates": 30,
+    "level": "INFO"
   }
 }
