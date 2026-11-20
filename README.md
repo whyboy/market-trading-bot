@@ -16,9 +16,9 @@ market-trading-bot/
 │       │   └── ETFRotationStrategy.py # ETF动量轮动
 │       ├── models.py               # 行情快照、排名与目标持仓
 │       ├── AKShareMarket.py        # 行情适配与交易日历
-│       ├── PaperExecutor.py        # 模拟调仓、交易单位、费用与现金约束
+│       ├── PapExecutor.py        # 模拟调仓、交易单位、费用与现金约束
 │       ├── StrategyLogger.py       # 策略日志、按日分文件、保留日期清理
-│       ├── PaperLedger.py          # SQLite事务账本与CSV导出
+│       ├── PapLedger.py          # SQLite事务账本与CSV导出
 │       ├── report.py               # 收益统计、曲线、日报、PushPlus
 │       └── runner.py               # 配置加载、预览及模拟调仓协调
 ├── data/                           # 按实例保存运行数据
@@ -70,7 +70,7 @@ python -m venv .venv
 ## 手动模拟调仓
 
 ```bash
-.venv/bin/python main.py --paper etf_rotation_pap
+.venv/bin/python main.py --pap etf_rotation_pap
 ```
 
 仅允许配置中唯一、启用的 `pap` 实例，拒绝 `pro`。首次运行按 `initial_cash` 空仓开户，后续从账本恢复；修改初始资金不会覆盖已有账户。默认命令仍只预览。手动调仓使用运行时行情，当前并不强制在14:30执行。

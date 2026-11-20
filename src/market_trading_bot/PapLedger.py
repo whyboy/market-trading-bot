@@ -5,14 +5,14 @@ import os
 import re
 import sqlite3
 from .models import StrategyResult
-from .PaperExecutor import PaperExecutor
+from .PapExecutor import PapExecutor
 from contextlib import closing
 from dataclasses import asdict
 from decimal import Decimal
 from pathlib import Path
 
 
-class PaperLedger:
+class PapLedger:
     """按实例保存完整调仓快照，同日唯一约束防止并发及重跑重复成交。"""
 
     def __init__(self, directory: Path, instance_id: str):
@@ -31,7 +31,7 @@ class PaperLedger:
             row = connection.execute('SELECT payload FROM runs WHERE day = ?', (day,)).fetchone()
         return json.loads(row[0]) if row else None
 
-    def rebalance(self, signal: StrategyResult, executor: PaperExecutor, initial_cash: float) -> dict:
+    def rebalance(self, signal: StrategyResult, executor: PapExecutor, initial_cash: float) -> dict:
         """在单个事务内恢复账户、模拟调仓和提交完整结果；异常自动回滚。
 
         :return: 已提交结果；同日重跑直接返回首次结果。

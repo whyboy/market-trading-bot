@@ -1,10 +1,10 @@
-"""纯内存模拟调仓；账户持久化由 PaperLedger 负责。"""
+"""纯内存模拟调仓；账户持久化由 PapLedger 负责。"""
 import math
 from .models import StrategyResult
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP
 
 
-class PaperExecutor:
+class PapExecutor:
     """按整手、可卖数量、佣金和现金约束模拟成交，先卖后买。"""
 
     def __init__(self, settings: dict, instruments: dict):

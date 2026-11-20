@@ -7,25 +7,25 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 from decimal import Decimal
 from market_trading_bot.models import RankedETF, StrategyResult
-from market_trading_bot.PaperExecutor import PaperExecutor
-from market_trading_bot.PaperLedger import PaperLedger
-from market_trading_bot.runner import run_paper
+from market_trading_bot.PapExecutor import PapExecutor
+from market_trading_bot.PapLedger import PapLedger
+from market_trading_bot.runner import run_pap
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 
-class PaperTests(unittest.TestCase):
+class PapTests(unittest.TestCase):
     def setUp(self):
         self.temporary = TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.rules = {'A': {'lot_size': 100, 't_plus_one': True},
                       'B': {'lot_size': 100, 't_plus_one': False}}
-        self.executor = PaperExecutor({'commission_rate': .0002, 'minimum_commission': 5,
+        self.executor = PapExecutor({'commission_rate': .0002, 'minimum_commission': 5,
                                        'slippage_rate': 0}, self.rules)
-        self.ledger = PaperLedger(self.root, 'pap')
+        self.ledger = PapLedger(self.root, 'pap')
 
     def signal(self, day=20, winner='A', weight=1, prices=(10, 20)):
         now = datetime(2026, 11, day, 14, 30, tzinfo=ZoneInfo('Asia/Shanghai'))
@@ -43,7 +43,7 @@ class PaperTests(unittest.TestCase):
 
     def test_restore_sell_before_buy_and_t_plus_zero(self):
         self.ledger.rebalance(self.signal(), self.executor, 10000)
-        restored = PaperLedger(self.root, 'pap')
+        restored = PapLedger(self.root, 'pap')
         result = restored.rebalance(self.signal(day=23, winner='B'), self.executor, 999999)
         self.assertEqual([fill['side'] for fill in result['fills']], ['sell', 'buy'])
         self.assertNotIn('A', result['positions'])
@@ -101,7 +101,7 @@ class PaperTests(unittest.TestCase):
         self.ledger.export_csv()
         with (self.ledger.directory / 'fills.csv').open() as stream:
             self.assertEqual(next(csv.DictReader(stream))['quantity'], '900')
-        self.assertIsNone(PaperLedger(self.root, 'other').completed('2026-11-20'))
+        self.assertIsNone(PapLedger(self.root, 'other').completed('2026-11-20'))
 
     def test_insufficient_cash_and_slippage(self):
         result = self.ledger.rebalance(self.signal(), self.executor, 1000)
@@ -120,7 +120,7 @@ class PaperTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.executor.rebalance(self.signal(), account)
 
-    def test_paper_runner_retries_without_market_and_recovers_csv(self):
+    def test_pap_runner_retries_without_market_and_recovers_csv(self):
         (self.root / 'config').mkdir()
         global_config = {'timezone': 'Asia/Shanghai', 'market': {}, 'storage': {'data_dir': 'data'}, 'logging': {}}
         config = {'strategy': 'etf_rotation', 'instances': [{'id': 'pap', 'enabled': True, 'mode': 'pap',
@@ -136,18 +136,18 @@ class PaperTests(unittest.TestCase):
             clock.now.return_value = self.signal().as_of
             strategy.return_value.calculate.return_value = self.signal()
             market.return_value.load.return_value = self.signal().as_of, {}
-            with patch.object(PaperLedger, 'export_csv', side_effect=OSError('disk full')):
-                first = run_paper(self.root, path, 'pap')
+            with patch.object(PapLedger, 'export_csv', side_effect=OSError('disk full')):
+                first = run_pap(self.root, path, 'pap')
             self.assertFalse(first['csv_exported'])
             market.reset_mock()
-            second = run_paper(self.root, path, 'pap')
+            second = run_pap(self.root, path, 'pap')
             market.assert_not_called()
             self.assertTrue(second['csv_exported'])
             self.assertEqual(first['fills'], second['fills'])
         config['instances'][0]['mode'] = 'pro'
         path.write_text(json.dumps(config))
         with patch('market_trading_bot.runner.strategy_logging'), self.assertRaises(ValueError):
-            run_paper(self.root, path, 'pap')
+            run_pap(self.root, path, 'pap')
 
 
 if __name__ == '__main__':

@@ -1,8 +1,8 @@
 """协调信号预览与手动模拟调仓，按实例恢复和提交账本。"""
 import json
 from .AKShareMarket import AKShareMarket, SHANGHAI
-from .PaperExecutor import PaperExecutor
-from .PaperLedger import PaperLedger
+from .PapExecutor import PapExecutor
+from .PapLedger import PapLedger
 from .strategies.ETFRotationStrategy import ETFRotationStrategy
 from .StrategyLogger import strategy_logging
 from dataclasses import asdict
@@ -22,7 +22,7 @@ def preview_signals(root: Path, strategy_path: Path) -> dict:
     return _run(root, strategy_path)
 
 
-def run_paper(root: Path, strategy_path: Path, instance_id: str) -> dict:
+def run_pap(root: Path, strategy_path: Path, instance_id: str) -> dict:
     """为启用的 pap 实例模拟调仓；同一北京时间日期只提交一次。
 
     :param instance_id: 策略配置中的实例 ID，不允许实盘或禁用实例。
@@ -37,7 +37,7 @@ def _run(root: Path, strategy_path: Path, instance_id: str | None = None) -> dic
         settings = json.load(stream)
     with strategy_path.open() as stream:
         configuration = json.load(stream)
-    operation = 'paper_rebalance' if instance_id is not None else 'signal_preview'
+    operation = 'pap_rebalance' if instance_id is not None else 'signal_preview'
     with strategy_logging(root, configuration['strategy'], settings['logging']) as logger:
         logger.info('运行开始 operation=%s strategy=%s instance=%s', operation, configuration['strategy'], instance_id)
         try:
@@ -51,12 +51,12 @@ def _run(root: Path, strategy_path: Path, instance_id: str | None = None) -> dic
                 if len(matches) != 1 or matches[0]['mode'] != 'pap' or matches[0]['enabled'] is not True:
                     raise ValueError('必须指定唯一、启用的pap实例')
                 instance = matches[0]
-                executor = PaperExecutor(instance['execution'], configuration['instruments'])
-                ledger = PaperLedger(root / settings['storage']['data_dir'], instance_id)
+                executor = PapExecutor(instance['execution'], configuration['instruments'])
+                ledger = PapLedger(root / settings['storage']['data_dir'], instance_id)
                 completed = ledger.completed(datetime.now(SHANGHAI).date().isoformat())
                 if completed:
                     logger.info('跳过重复调仓 instance=%s date=%s', instance_id, completed['date'])
-                    return _paper_output(ledger, completed, logger)
+                    return _pap_output(ledger, completed, logger)
             strategy = ETFRotationStrategy(configuration['parameters'])
             market = AKShareMarket(settings['market'], logger=logger)
             as_of, snapshots = market.load(strategy.symbols, strategy.history_points)
@@ -70,7 +70,7 @@ def _run(root: Path, strategy_path: Path, instance_id: str | None = None) -> dic
                 committed = ledger.rebalance(result, executor, instance['initial_cash'])
                 logger.info('模拟记账成功 instance=%s date=%s fills=%d cash=%s',
                             instance_id, committed['date'], len(committed['fills']), committed['cash'])
-                return _paper_output(ledger, committed, logger)
+                return _pap_output(ledger, committed, logger)
             logger.info('交易状态 executed=false reason=仅信号预览，未执行买卖')
             logger.info('运行成功 as_of=%s', as_of.isoformat())
             return {'operation': 'signal_preview', 'provider': settings['market']['provider'],
@@ -80,9 +80,9 @@ def _run(root: Path, strategy_path: Path, instance_id: str | None = None) -> dic
             raise
 
 
-def _paper_output(ledger: PaperLedger, result: dict, logger) -> dict:
+def _pap_output(ledger: PapLedger, result: dict, logger) -> dict:
     """导出查看副本；导出失败仍返回已提交结果，重跑可补齐 CSV。"""
-    output = {'operation': 'paper_rebalance', 'instance_id': ledger.directory.name, **result}
+    output = {'operation': 'pap_rebalance', 'instance_id': ledger.directory.name, **result}
     try:
         ledger.export_csv()
         output['csv_exported'] = True
