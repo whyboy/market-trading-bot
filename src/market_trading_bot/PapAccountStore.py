@@ -60,32 +60,52 @@ class PapAccountStore:
         return json.loads(payload)
 
     def export_csv(self):
-        """从权威账本重建 CSV；导出中断可重试，不会重新执行交易。"""
-        # 与记账使用同一写锁，避免并发导出用旧快照覆盖新文件。
+        """重建账户交易汇总，每个有成交的日期一行；无成交只保留在 SQLite。
+
+        总资产采用调仓时估值；累计盈亏包含费用，收益率相对实际开户资金。
+        多笔成交或多只持仓按分号对齐列出，完整明细保留在 SQLite。
+        """
         with closing(sqlite3.connect(self.database, timeout=30)) as connection, connection:
             connection.execute('BEGIN IMMEDIATE')
             runs = [json.loads(row[0]) for row in connection.execute('SELECT payload FROM runs ORDER BY day')]
-            tables = {
-                'runs': (['date', 'status'], [{'date': run['date'], 'status': 'completed'} for run in runs]),
-                'equity': (['date', 'cash', 'equity'], [{key: run[key] for key in ('date', 'cash', 'equity')} for run in runs]),
-                'orders': (['date', 'order_id', 'symbol', 'side', 'requested_quantity', 'filled_quantity', 'status', 'reason'],
-                           [{'date': run['date'], **order} for run in runs for order in run['orders']]),
-                'fills': (['date', 'fill_id', 'order_id', 'symbol', 'side', 'quantity', 'price', 'amount', 'commission'],
-                          [{'date': run['date'], **fill} for run in runs for fill in run['fills']]),
-                'positions': (['date', 'symbol', 'quantity', 'sellable'],
-                              [{'date': run['date'], 'symbol': symbol, **position} for run in runs for symbol, position in run['positions'].items()]),
-                'signals': (['date', 'symbol', 'target_weight', 'score', 'price', 'quote_time'],
-                            [{'date': run['date'], 'symbol': item['symbol'],
-                              'target_weight': run['signal']['target_weights'][item['symbol']],
-                              **{key: item[key] for key in ('score', 'price', 'quote_time')}}
-                             for run in runs for item in run['signal']['ranking']]),
-            }
-            for name, (fields, rows) in tables.items():
-                temporary = self.directory / f'{name}.csv.tmp'
-                with temporary.open('w', encoding='utf-8', newline='') as stream:
-                    writer = csv.DictWriter(stream, fieldnames=fields)
-                    writer.writeheader()
-                    writer.writerows(rows)
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                temporary.replace(self.directory / f'{name}.csv')
+            # 从首次记账的现金流还原开户资金，兼容原有账本和首次无成交的情况。
+            initial_cash = Decimal(runs[0]['cash']) if runs else Decimal('0')
+            if runs:
+                for fill in runs[0]['fills']:
+                    amount, fee = Decimal(fill['amount']), Decimal(fill['commission'])
+                    initial_cash += amount + fee if fill['side'] == 'buy' else fee - amount
+            fields = ['date', 'buy_etf', 'buy_quantity', 'buy_price',
+                      'sell_etf', 'sell_quantity', 'sell_price', 'commission',
+                      'holding_etf', 'holding_quantity', 'holding_price', 'market_value',
+                      'cash', 'total_assets', 'initial_cash', 'cumulative_pnl',
+                      'cumulative_return_pct', 'net_value']
+            temporary = self.directory / 'account_trades.csv.tmp'
+            with temporary.open('w', encoding='utf-8-sig', newline='') as stream:
+                writer = csv.DictWriter(stream, fieldnames=fields)
+                writer.writeheader()
+                for run in runs:
+                    if not run['fills']:
+                        continue
+                    equity, cash = Decimal(run['equity']), Decimal(run['cash'])
+                    row = {'date': run['date'], 'cash': str(cash), 'total_assets': str(equity),
+                           'initial_cash': str(initial_cash), 'market_value': str(equity - cash),
+                           'commission': str(sum((Decimal(fill['commission']) for fill in run['fills']), Decimal('0.00'))),
+                           'cumulative_pnl': str(equity - initial_cash),
+                           'cumulative_return_pct': format((equity / initial_cash - 1) * 100, '.6f'),
+                           'net_value': format(equity / initial_cash, '.8f')}
+                    for side in ('buy', 'sell'):
+                        fills = [fill for fill in run['fills'] if fill['side'] == side]
+                        for column, key in (('etf', 'symbol'), ('quantity', 'quantity'), ('price', 'price')):
+                            row[f'{side}_{column}'] = ';'.join(str(fill[key]) for fill in fills)
+                    holdings = sorted(run['positions'])
+                    prices = {item['symbol']: item['price'] for item in run['signal']['ranking']}
+                    row['holding_etf'] = ';'.join(holdings)
+                    row['holding_quantity'] = ';'.join(str(run['positions'][symbol]['quantity']) for symbol in holdings)
+                    row['holding_price'] = ';'.join(str(prices[symbol]) for symbol in holdings)
+                    writer.writerow(row)
+                stream.flush()
+                os.fsync(stream.fileno())
+            temporary.replace(self.directory / 'account_trades.csv')
+            # 新汇总成功后清理旧版自动导出的明细文件，SQLite 明细始终保留。
+            for name in ('runs', 'equity', 'orders', 'fills', 'positions', 'signals'):
+                (self.directory / f'{name}.csv').unlink(missing_ok=True)

@@ -70,15 +70,18 @@ class PapExecutor:
                     raise ValueError('滑点后价格必须为正数')
                 quantity = min(requested, position['sellable']) if side == 'sell' else requested
                 if side == 'buy':
-                    # 现金同时预留比例佣金和最低佣金，避免逐手递减。
-                    budget = min(cash / (1 + self.rate), cash - self.minimum)
-                    quantity = max(0, min(quantity, int(budget / price / lot) * lot))
+                    # 按实际取整后的佣金判断，避免临界现金少买一手。
+                    low, high = 0, quantity // lot
+                    while low < high:
+                        middle = (low + high + 1) // 2
+                        amount = self.money(price * middle * lot)
+                        if amount + self.commission(amount) <= cash:
+                            low = middle
+                        else:
+                            high = middle - 1
+                    quantity = low * lot
                 amount = self.money(price * quantity)
                 fee = self.commission(amount) if quantity else Decimal('0.00')
-                if side == 'buy' and quantity and amount + fee > cash:
-                    quantity = max(0, quantity - lot)
-                    amount = self.money(price * quantity)
-                    fee = self.commission(amount) if quantity else Decimal('0.00')
                 if side == 'sell' and quantity and cash + amount < fee:
                     quantity, amount, fee = 0, Decimal('0.00'), Decimal('0.00')
                 order = {'order_id': f'{day}-{len(orders) + 1}', 'symbol': symbol, 'side': side,

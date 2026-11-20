@@ -1,5 +1,6 @@
 """协调信号预览与手动模拟调仓，按实例恢复和提交账本。"""
 import json
+import sqlite3
 from .AKShareMarket import AKShareMarket, SHANGHAI
 from .PapAccountStore import PapAccountStore
 from .PapExecutor import PapExecutor
@@ -86,7 +87,7 @@ def _pap_output(account_store: PapAccountStore, result: dict, logger) -> dict:
     try:
         account_store.export_csv()
         output['csv_exported'] = True
-    except OSError:
+    except (OSError, sqlite3.Error):
         logger.exception('CSV导出失败；模拟账本已提交，重跑可恢复导出')
         output['csv_exported'] = False
     return output

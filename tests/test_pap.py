@@ -1,6 +1,7 @@
 """验证模拟资金守恒、恢复、并发去重和失败重跑，不访问外部行情。"""
 import csv
 import json
+import sqlite3
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -75,7 +76,7 @@ class PapTests(unittest.TestCase):
             results = list(pool.map(lambda _: self.account_store.rebalance(self.signal(), self.executor, 10000), range(8)))
         self.assertTrue(all(result == results[0] for result in results))
         self.account_store.export_csv()
-        with (self.account_store.directory / 'fills.csv').open() as stream:
+        with (self.account_store.directory / 'account_trades.csv').open(encoding='utf-8-sig') as stream:
             self.assertEqual(len(list(csv.DictReader(stream))), 1)
 
     def test_failure_rolls_back_and_can_retry(self):
@@ -97,11 +98,86 @@ class PapTests(unittest.TestCase):
     def test_exports_can_be_rebuilt_and_instances_are_isolated(self):
         self.account_store.rebalance(self.signal(), self.executor, 10000)
         self.account_store.export_csv()
-        (self.account_store.directory / 'fills.csv').write_text('broken')
+        (self.account_store.directory / 'account_trades.csv').write_text('broken')
         self.account_store.export_csv()
-        with (self.account_store.directory / 'fills.csv').open() as stream:
-            self.assertEqual(next(csv.DictReader(stream))['quantity'], '900')
+        with (self.account_store.directory / 'account_trades.csv').open(encoding='utf-8-sig') as stream:
+            self.assertEqual(next(csv.DictReader(stream))['buy_quantity'], '900')
         self.assertIsNone(PapAccountStore(self.root, 'other').completed('2026-11-20'))
+
+    def read_trades(self):
+        with (self.account_store.directory / 'account_trades.csv').open(encoding='utf-8-sig') as stream:
+            return list(csv.DictReader(stream))
+
+    def test_summary_skips_no_fills_and_uses_actual_initial_cash(self):
+        self.account_store.rebalance(self.signal(weight=0), self.executor, 10000)
+        self.account_store.export_csv()
+        self.assertEqual(self.read_trades(), [])
+        self.account_store.rebalance(self.signal(day=23), self.executor, 999999)
+        self.account_store.rebalance(self.signal(day=24), self.executor, 999999)
+        self.account_store.export_csv()
+        rows = self.read_trades()
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row['date'], '2026-11-23')
+        self.assertEqual(row['buy_etf'], 'A')
+        self.assertEqual(row['sell_etf'], '')
+        self.assertEqual(row['commission'], '5.00')
+        self.assertEqual(row['cash'], '995.00')
+        self.assertEqual(row['market_value'], '9000.00')
+        self.assertEqual(row['total_assets'], '9995.00')
+        self.assertEqual(row['initial_cash'], '10000.00')
+        self.assertEqual(row['cumulative_pnl'], '-5.00')
+        self.assertEqual(row['cumulative_return_pct'], '-0.050000')
+        self.assertEqual(row['net_value'], '0.99950000')
+        self.assertIsNotNone(self.account_store.completed('2026-11-24'))
+
+    def test_summary_includes_rotation_and_liquidation(self):
+        self.account_store.rebalance(self.signal(), self.executor, 10000)
+        self.account_store.rebalance(self.signal(day=23, winner='B'), self.executor, 10000)
+        self.account_store.rebalance(self.signal(day=24, weight=0), self.executor, 10000)
+        (self.account_store.directory / 'fills.csv').write_text('old export')
+        self.account_store.export_csv()
+        rows = self.read_trades()
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[1]['buy_etf'], 'B')
+        self.assertEqual(rows[1]['buy_quantity'], '400')
+        self.assertEqual(rows[1]['sell_etf'], 'A')
+        self.assertEqual(rows[1]['sell_quantity'], '900')
+        self.assertEqual(rows[1]['commission'], '10.00')
+        self.assertEqual(rows[1]['cumulative_pnl'], '-15.00')
+        self.assertEqual(rows[2]['holding_etf'], '')
+        self.assertEqual(rows[2]['market_value'], '0.00')
+        self.assertEqual(rows[2]['total_assets'], rows[2]['cash'])
+        self.assertEqual(len(list(self.account_store.directory.glob('*.csv'))), 1)
+
+    def test_summary_tracks_gains_across_untraded_dates(self):
+        self.account_store.rebalance(self.signal(), self.executor, 10000)
+        self.account_store.rebalance(self.signal(day=23, prices=(12, 20)), self.executor, 10000)
+        self.account_store.rebalance(self.signal(day=24, winner='B', prices=(12, 20)), self.executor, 10000)
+        self.account_store.export_csv()
+        rows = self.read_trades()
+        self.assertEqual([row['date'] for row in rows], ['2026-11-20', '2026-11-24'])
+        self.assertEqual(rows[-1]['total_assets'], '11785.00')
+        self.assertEqual(rows[-1]['initial_cash'], '10000.00')
+        self.assertEqual(rows[-1]['cumulative_pnl'], '1785.00')
+        self.assertEqual(rows[-1]['cumulative_return_pct'], '17.850000')
+
+    def test_failed_export_preserves_previous_csv(self):
+        self.account_store.rebalance(self.signal(), self.executor, 10000)
+        self.account_store.export_csv()
+        path = self.account_store.directory / 'account_trades.csv'
+        previous = path.read_bytes()
+        self.account_store.rebalance(self.signal(day=23, winner='B'), self.executor, 10000)
+        with patch.object(Path, 'replace', side_effect=OSError('interrupted')), self.assertRaises(OSError):
+            self.account_store.export_csv()
+        self.assertEqual(path.read_bytes(), previous)
+        self.account_store.export_csv()
+        self.assertEqual(len(self.read_trades()), 2)
+
+    def test_exact_cash_includes_rounded_commission(self):
+        result = self.account_store.rebalance(self.signal(prices=(10.001, 20)), self.executor, 30009)
+        self.assertEqual(result['fills'][0]['quantity'], 3000)
+        self.assertEqual(result['cash'], '0.00')
 
     def test_insufficient_cash_and_slippage(self):
         result = self.account_store.rebalance(self.signal(), self.executor, 1000)
@@ -139,6 +215,8 @@ class PapTests(unittest.TestCase):
             with patch.object(PapAccountStore, 'export_csv', side_effect=OSError('disk full')):
                 first = run_pap(self.root, path, 'pap')
             self.assertFalse(first['csv_exported'])
+            with patch.object(PapAccountStore, 'export_csv', side_effect=sqlite3.OperationalError('database is locked')):
+                self.assertFalse(run_pap(self.root, path, 'pap')['csv_exported'])
             market.reset_mock()
             second = run_pap(self.root, path, 'pap')
             market.assert_not_called()

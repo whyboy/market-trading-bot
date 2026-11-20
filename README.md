@@ -33,7 +33,7 @@ market-trading-bot/
 - 策略只输出目标持仓；执行器负责买卖数量、资金与交易限制检查、委托及成交。订单与成交分别记录，为实盘未成交、部分成交及撤单保留空间。
 - 一个策略配置可声明多个运行实例；实例通过唯一 `id` 与 `mode` 区分模拟盘和实盘，各自维护独立账本。新增策略增加策略模块与JSON配置。
 - 行情缓存可共享；资金、持仓和收益不可跨实例混用。多个策略共用实盘账户的资金分配与订单汇总暂不实现。
-- 数据按 `data/<instance_id>/` 保存 `signals.csv`、`orders.csv`、`fills.csv`、`positions.csv`、`equity.csv`、`runs.csv`；报告按 `reports/<instance_id>/` 保存。权威记录保存在同目录的 `ledger.sqlite3`；账户、信号、订单、成交和完成状态在同一 SQLite 事务内提交。同日唯一键与写事务共同防止并发重复成交，CSV 为可重建的查看副本。
+- 每个账户按 `data/<instance_id>/account_trades.csv` 保存交易汇总，仅有实际成交的日期一行；报告按 `reports/<instance_id>/` 保存。权威记录保存在同目录的 `ledger.sqlite3`；账户、信号、订单、成交和完成状态在同一 SQLite 事务内提交。同日唯一键与写事务共同防止并发重复成交，CSV 为可重建的查看副本。
 
 ## ETF策略口径
 
@@ -79,10 +79,29 @@ python -m venv .venv
 - 买价为报价加滑点，卖价减滑点，按0.001元向不利方向取整；佣金取成交额比例与最低佣金的较大值，金额按分四舍五入。输出分别记录订单请求量、实际成交量和拒绝/缩量原因。
 - `instruments` 显式配置交易单位与 `t_plus_one`。默认黄金ETF、纳指ETF支持当日卖出，创业板ETF、上证180ETF买入当日不可卖；下一交易日期运行时解锁历史持仓。当前每天只调仓一次，不支持日内追加调仓。
 - 同一实例同一北京时间日期只提交一次，包括并发调用。已提交时直接返回原结果，不再请求行情；未提交的失败可重试，早于最后记账日期的调仓被拒绝。更换ETF池前必须处理已有持仓，缺少持仓行情时停止。
-- SQLite 是恢复账户的唯一依据，请保留并备份整个实例目录，勿通过编辑 CSV 修改账户。CSV 导出失败时结果返回 `csv_exported=false`，账本仍已提交；重跑可恢复导出，不会再成交。每个 CSV 采用临时文件替换，多文件更新期间以 SQLite 为准。
-- `equity.csv` 是调仓时的盘中估值，尚非收盘净值或日报。模拟成交不验证盘口深度、停牌、涨跌停、分红和拆合份，不代表实盘成交能力；调整份额的公司行为处理留待后续实现。
+- SQLite 是恢复账户的唯一依据，请保留并备份整个实例目录，勿通过编辑 CSV 修改账户。CSV 导出失败时结果返回 `csv_exported=false`，账本仍已提交；重跑可恢复导出，不会再成交。CSV 使用临时文件原子替换，成功后移除旧版自动生成的六类明细 CSV。
+- `account_trades.csv` 使用交易时的盘中估值，未交易日不记录，因此净值只反映交易时点，不是每日收益曲线。模拟成交不验证盘口深度、停牌、涨跌停、分红和拆合份，不代表实盘成交能力；调整份额的公司行为处理留待后续实现。
 
 交易规则参考：[上交所黄金ETF指引](https://www.sse.com.cn/lawandrules/sselawsrules2025/fund/trading/c/c_20250519_10779388.shtml)、[上交所跨境ETF说明](https://edu.sse.com.cn/etfgame/gametopic/c/4940398.shtml)、[深交所场内基金交易指南](https://investor.szse.cn/warning/activities/fundIntroduction/t20210104_584079.html)。新增标的前需核实并配置其交易规则。
+
+### 账户交易汇总
+
+每个账户一个 `account_trades.csv`，按日期排序，仅实际成交时记录，无成交或全部拒单不会新增行。SQLite 仍保存全部运行记录，用于账户恢复和防重复。
+
+| 列 | 含义 |
+|---|---|
+| `date` | 交易日期 |
+| `buy_etf` / `buy_quantity` / `buy_price` | 买入ETF、实际数量、成交价 |
+| `sell_etf` / `sell_quantity` / `sell_price` | 卖出ETF、实际数量、成交价 |
+| `commission` | 当次成交佣金合计 |
+| `holding_etf` / `holding_quantity` / `holding_price` | 交易后持仓ETF、数量、估值价格 |
+| `market_value` / `cash` / `total_assets` | 持仓市值、剩余现金、总资产 |
+| `initial_cash` | 实际开户资金，修改配置不会改变该基准 |
+| `cumulative_pnl` | 总资产减实际开户资金，已包含费用和滑点影响 |
+| `cumulative_return_pct` | 累计收益率，单位为百分比，`1.5` 表示 1.5% |
+| `net_value` | 总资产除以开户资金，初始基准为 1 |
+
+买卖或持仓为空时对应列留空；多笔成交或多只持仓用分号按相同顺序对齐，各笔详情保留在 SQLite。CSV 使用 UTF-8 BOM 编码，便于表格软件打开。绘图可直接使用 `date` 与 `net_value` 或 `total_assets`；横轴缺失日期表示没有成交。当前未支持出入金，未来接入时需要同步调整净值算法。
 
 ## 离线验证
 
