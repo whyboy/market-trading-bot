@@ -1,11 +1,11 @@
 """手动计算信号；后续在此接入调度、执行和落盘。"""
 import json
+from .market import AKShareMarket
+from .strategies.etf_rotation import ETFRotationStrategy
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
-from .market import AKShareMarket
-from .strategies.etf_rotation import ETFRotationStrategy
 
 
 def preview(root: Path, strategy_path: Path, at: str | None = None) -> dict:

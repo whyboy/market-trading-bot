@@ -1,8 +1,8 @@
 """复现聚宽加权动量评分与目标波动率仓位。"""
 import math
-from datetime import datetime
 import numpy as np
 from ..models import MarketSnapshot, RankedETF, StrategyResult
+from datetime import datetime
 
 
 class ETFRotationStrategy:

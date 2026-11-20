@@ -1,13 +1,13 @@
 """AKShare适配：东财前复权日线、未复权分钟价格、上海市场交易日历。"""
+import akshare as ak
 import math
+import pandas as pd
 import re
 import time as clock
+from .models import DailyClose, MarketSnapshot
+from akshare.utils.context import config as ak_config
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
-import akshare as ak
-import pandas as pd
-from akshare.utils.context import config as ak_config
-from .models import DailyClose, MarketSnapshot
 
 SHANGHAI = ZoneInfo('Asia/Shanghai')
 
