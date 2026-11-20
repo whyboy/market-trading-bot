@@ -118,22 +118,6 @@ python -m venv .venv
 
 多笔成交或持仓使用分号按顺序对齐。CSV 的资产值采用调仓时估值，且不记录无成交日期，因此不是每日净值曲线。完整明细以 SQLite 为准。
 
-## 测试
-
-```bash
-PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
-```
-
-测试使用临时账本和模拟行情，不访问外部行情或正式账户。
-
 ## 日志
 
 日志写入 `logs/<strategy>/YYYY-MM-DD.log`，默认保留最近 30 个有日志的日期。日志包含运行状态、行情区间、报价、策略排名、目标权重和模拟成交摘要，不记录 Token。
-
-## 已知限制
-
-- 模拟成交不校验盘口深度、停牌、涨跌停、分红或拆合份，也不代表实盘成交能力。
-- 当前不支持出入金、日内追加调仓、多策略共享账户或自动重试行情请求。
-- 免费行情可能延迟或限流；前复权历史会随数据源更新，不适合作为可复现回测数据。
-
-交易规则参考：[上交所黄金 ETF 指引](https://www.sse.com.cn/lawandrules/sselawsrules2025/fund/trading/c/c_20250519_10779388.shtml)、[上交所跨境 ETF 说明](https://edu.sse.com.cn/etfgame/gametopic/c/4940398.shtml)、[深交所场内基金交易指南](https://investor.szse.cn/warning/activities/fundIntroduction/t20210104_584079.html)。新增标的前需核实并配置其交易规则。
