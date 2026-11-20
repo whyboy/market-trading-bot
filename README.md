@@ -78,15 +78,19 @@ python -m venv .venv
 
 策略配置位于 `config/etf_rotation_strategy.json`：
 
-| 配置 | 用途 |
-|---|---|
-| `instances` | 模拟实例、开户资金和交易费用 |
-| `parameters.etf_pool` | ETF 池 |
-| `parameters.momentum_price_points` | 动量价格点数量 |
-| `parameters.volatility_price_points` | 波动率价格点数量 |
-| `parameters.target_annual_volatility` | 目标年化波动率 |
-| `instruments` | 每个标的的交易单位和 T+1 规则 |
-| `schedule` | 预留调度时间，当前不会自动执行 |
+| 配置 | 默认值 | 用途 |
+|---|---|---|
+| `strategy` | `etf_rotation` | 策略类型 |
+| `instances` | `etf_rotation_pap`；开户资金 100,000 元；佣金率 0.02%；最低佣金 5 元；滑点 0 | 模拟账户与交易费用 |
+| `parameters.etf_pool` | `518880.XSHG`、`513100.XSHG`、`159915.XSHE`、`510180.XSHG` | ETF 池 |
+| `parameters.momentum_price_points` | `25` | 动量价格点数量 |
+| `parameters.volatility_price_points` | `20` | 波动率价格点数量 |
+| `parameters.target_annual_volatility` | `0.15` | 目标年化波动率 15% |
+| `parameters.annualization_days` | `250` | 年化交易日数量 |
+| `parameters.select_num` | `1` | 选择排名第一的 ETF |
+| `instruments` | 每手 100 份；黄金 ETF、纳指 ETF 为 T+0，创业板 ETF、上证 180 ETF 为 T+1 | 交易单位和卖出规则 |
+| `schedule.trade_time` | `14:30` | 调仓时间，当前需手动执行 |
+| `schedule.report_time` | `15:15` | 收盘日报时间，当前尚未实现 |
 
 `initial_cash` 仅在首次开户时使用并保存到账本；后续修改配置不会改变账户基准。PushPlus Token 等凭据不要提交到仓库。
 
