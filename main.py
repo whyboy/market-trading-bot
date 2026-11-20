@@ -11,11 +11,10 @@ sys.path.insert(0, str(ROOT / 'src'))
 def main() -> int:
     parser = argparse.ArgumentParser(description='ETF策略信号预览（不交易）')
     parser.add_argument('--config', default='config/etf_rotation_strategy.json', help='策略JSON路径，相对仓库根目录')
-    parser.add_argument('--at', help='行情截止时刻，例如2026-11-20T14:30:00；无时区时按北京时间解释')
     args = parser.parse_args()
     from market_trading_bot.runner import preview
     try:
-        result = preview(ROOT, ROOT / args.config, args.at)
+        result = preview(ROOT, ROOT / args.config)
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str, allow_nan=False))
         return 0
     except Exception as exc:
