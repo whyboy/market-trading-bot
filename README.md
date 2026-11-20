@@ -8,7 +8,7 @@ Python 多策略交易项目，先实现 ETF 动量轮动模拟盘，预留实�
 market-trading-bot/
 ├── main.py                         # 程序入口
 ├── config/
-│   ├── global.example.json         # 全局配置模板：时区、行情源、存储、PushPlus
+│   ├── global.json                 # 全局配置：时区、行情源、存储、PushPlus
 │   └── etf_rotation_strategy.json  # 策略参数、运行实例、资金、费用、调度
 ├── src/
 │   └── market_trading_bot/
@@ -45,6 +45,6 @@ market-trading-bot/
 
 ## 配置
 
-复制 `config/global.example.json` 为 `config/global.json`，集中填写行情源与PushPlus Token；实际配置已加入Git忽略。行情源、图片上传方案和券商适配待后续确定，`null`表示尚未选择；当前配置是后续实现的约定。
+在 `config/global.json` 中集中配置行情源与PushPlus Token；仓库中的Token保持为空，真实Token仅在服务器填写，不提交。行情源、图片上传方案和券商适配待后续确定，`null`表示尚未选择；当前配置是后续实现的约定。
 
 策略配置中的 `instances` 支持同策略多实例；第一版仅启用 `pap`。未来增加 `pro` 实例及对应券商执行器。金额、费率、滑点、策略参数和执行时间均使用JSON配置，不使用环境配置文件。
