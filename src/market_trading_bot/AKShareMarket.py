@@ -19,7 +19,15 @@ class MarketDataError(RuntimeError):
 
 
 class AKShareMarket:
+    """获取前复权历史收盘价和未复权盘中报价，并校验可用性。"""
+
     def __init__(self, settings: dict, logger: logging.Logger | None = None):
+        """读取行情配置，并设置 AKShare 全局请求超时。
+
+        :param settings: 行情源、报价时效、回溯天数、超时及请求间隔配置。
+        :param logger: 运行日志；省略时使用模块日志。
+        :raises ValueError: 行情源不受支持或请求参数无效。
+        """
         self.logger = logger or logging.getLogger(__name__)
         if settings['provider'] != 'akshare_eastmoney':
             raise ValueError('当前仅支持akshare_eastmoney行情源')
@@ -36,6 +44,7 @@ class AKShareMarket:
         ak_config.timeout = timeout
 
     def _request(self, function, **kwargs):
+        """按配置限制请求开始时间的间隔，透传参数、结果和异常。"""
         remaining = self.interval - (clock.monotonic() - self.last_request)
         if remaining > 0:
             clock.sleep(remaining)
@@ -43,6 +52,12 @@ class AKShareMarket:
         return function(**kwargs)
 
     def _quotes(self, symbols: tuple[str, ...]) -> dict:
+        """批量获取当前报价，要求每个标的恰好返回一条。
+
+        :param symbols: 六位代码加 .XSHG 或 .XSHE 后缀的标的集合。
+        :return: 标的到（未复权价格、北京时间报价时间）的映射。
+        :raises MarketDataError: 代码无效或返回数据错误、缺失、重复。
+        """
         secids = {}
         for symbol in symbols:
             match = re.fullmatch(r'(\d{6})\.(XSHG|XSHE)', symbol)
@@ -70,10 +85,18 @@ class AKShareMarket:
 
     @staticmethod
     def _check_session(as_of: datetime):
+        """检查北京时间是否处于连续交易时段；不满足时抛出 MarketDataError。"""
         if not (time(9, 30) <= as_of.time() <= time(11, 30) or time(13) <= as_of.time() <= time(15)):
             raise MarketDataError('当前不在A股连续交易时段，策略执行时间为14:30')
 
     def load(self, symbols: tuple[str, ...], history_points: int) -> tuple[datetime, dict[str, MarketSnapshot]]:
+        """加载连续历史交易日收盘价，再批量获取当日盘中报价。
+
+        :param symbols: 待获取行情的标的代码。
+        :param history_points: 每个标的所需的历史收盘价数量，不含当日。
+        :return: 行情校验时刻（北京时间）及按标的索引的行情快照。
+        :raises MarketDataError: 非交易日/时段、历史不完整、报价过期、价格无效或接口失败。
+        """
         started = datetime.now(SHANGHAI)
         self.logger.info('行情获取开始 provider=akshare_eastmoney symbols=%s', ','.join(symbols))
         try:

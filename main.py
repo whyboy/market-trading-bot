@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT / 'src'))
 
 
 def main() -> int:
+    """运行信号预览并输出 JSON；成功返回 0，失败输出错误并返回 1。"""
     parser = argparse.ArgumentParser(description='ETF策略信号预览（不交易）')
     parser.add_argument('--config', default='config/etf_rotation_strategy.json', help='策略JSON路径，相对仓库根目录')
     args = parser.parse_args()

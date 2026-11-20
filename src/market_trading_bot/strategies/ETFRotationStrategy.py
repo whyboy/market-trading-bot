@@ -6,7 +6,13 @@ from datetime import datetime
 
 
 class ETFRotationStrategy:
+    """按加权动量选取一只 ETF，再按目标年化波动率计算仓位。"""
+
     def __init__(self, parameters: dict):
+        """读取 ETF 池、价格窗口和年化参数；配置无效时抛出 ValueError。
+
+        :param parameters: 策略参数字典；当前仅支持 select_num=1。
+        """
         self.symbols = tuple(parameters['etf_pool'])
         self.momentum_points = parameters['momentum_price_points']
         self.volatility_points = parameters['volatility_price_points']
@@ -25,9 +31,21 @@ class ETFRotationStrategy:
 
     @property
     def history_points(self) -> int:
+        """所需历史收盘价数量；两个计算窗口均另含一笔当日价格。"""
         return max(self.momentum_points, self.volatility_points) - 1
 
     def calculate(self, snapshots: dict[str, MarketSnapshot], as_of: datetime) -> StrategyResult:
+        """计算动量排名，将最高分标的按目标波动率分配仓位。
+
+        得分为年化回归收益乘 R²；全部为负仍选最高分，同分按 ETF 池顺序。
+        仓位上限为 100%，年化波动率低于 1e-6 时满仓，其余标的权重为零。
+
+        :param snapshots: 各标的行情；历史日期须递增且早于 as_of 当日。
+        :param as_of: 本次计算时刻，须与报价使用相同的时区口径。
+        :return: 计算时刻、按得分降序的排名和目标权重（0 至 1）。
+        :raises KeyError: 缺少 ETF 池中的标的。
+        :raises ValueError: 历史不足、日期或价格无效，或计算结果非有限数。
+        """
         ranking = []
         for symbol in self.symbols:
             snapshot = snapshots[symbol]
