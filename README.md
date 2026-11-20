@@ -43,4 +43,4 @@ requirements.txt                 依赖清单，功能实现时补充
 
 复制 `config/global.example.json` 为 `config/global.json`，集中填写行情源与PushPlus Token；实际配置已加入Git忽略。行情源、图片上传方案和券商适配待后续确定，`null`表示尚未选择；当前配置是后续实现的约定。
 
-策略配置中的 `instances` 支持同策略多实例；第一版仅启用 `simulation`。未来增加 `live` 实例及对应券商执行器。金额、费率、滑点、策略参数和执行时间均使用JSON配置，不使用环境配置文件。
+策略配置中的 `instances` 支持同策略多实例；第一版仅启用 `pap`。未来增加 `pro` 实例及对应券商执行器。金额、费率、滑点、策略参数和执行时间均使用JSON配置，不使用环境配置文件。
