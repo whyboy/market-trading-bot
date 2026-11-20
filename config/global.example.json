@@ -1,0 +1,15 @@
+{
+  "timezone": "Asia/Shanghai",
+  "market": {
+    "provider": null
+  },
+  "storage": {
+    "data_dir": "data",
+    "reports_dir": "reports"
+  },
+  "pushplus": {
+    "enabled": false,
+    "token": "",
+    "image_provider": null
+  }
+}
