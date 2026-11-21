@@ -1,6 +1,6 @@
 # market-trading-bot
 
-ETF 动量轮动工具，支持实时信号预览和手动模拟调仓。模拟账户使用 SQLite 原子记账，可恢复、可防止同日重复成交，并导出账户交易汇总 CSV。
+ETF 动量轮动工具，支持实时信号预览、手动模拟调仓和网页运行监控。模拟账户使用 SQLite 原子记账，可恢复、可防止同日重复成交，并导出账户交易汇总 CSV。
 
 当前仅实现 `etf_rotation` 策略和 `pap` 模拟模式。定时任务、收盘日报和推送尚未实现。
 
@@ -125,3 +125,51 @@ python -m venv .venv
 ## 日志
 
 日志写入 `logs/<strategy>/YYYY-MM-DD.log`，默认保留最近 30 个有日志的日期。日志包含运行状态、行情区间、报价、策略排名、目标权重和模拟成交摘要，不记录 Token。
+
+## 网页运行监控（第一版）
+
+使用 Vue 3 + TypeScript + Vite 构建页面，FastAPI 提供只读接口与静态文件。
+需要 Node.js 20.19+ 或 22.12+，以及 Python 3.12+。
+
+```bash
+.venv/bin/python -m pip install -r requirements.txt
+cd frontend
+npm ci
+npm run build
+cd ..
+.venv/bin/python -m uvicorn market_trading_bot.web.app:app --app-dir src --host 127.0.0.1 --port 8000
+```
+
+打开 `http://127.0.0.1:8000`。另一个终端启动交易常驻进程：
+
+```bash
+.venv/bin/python worker.py
+```
+
+worker 使用 Linux 文件锁防止同一数据目录重复启动。每个部署只启动一个 worker。它每 5 秒记录一次心跳，超过 20 秒未更新时页面显示心跳中断。
+页面展示交易进程本次启动时间、运行时长与最近心跳，可选择策略和账户查看最近调仓估值，
+并按日期点击、刷新及分段加载策略日志。没有账本时显示暂无账户记录，不会自动开户。
+同一策略多个账户的日志保存在同一日期文件中。
+
+当前 worker 默认待命，尚不包含定时调度；待命不代表已经执行过交易。
+若需启动时执行一次模拟调仓，再进入待命：
+
+```bash
+.venv/bin/python worker.py --pap etf_rotation_pap
+```
+
+该次执行的成功或失败会显示在监控页；原有 `main.py` 手动执行结果继续通过账本和日志查看，
+不会更新 worker 的最近任务状态。心跳数据库位于配置的数据目录下，账户和日志沿用原有配置。
+Web 和 worker 应由部署环境分别管理和重启；worker 停止后 Web 仍能显示其停止或失联状态。
+第一版无登录功能，默认仅监听本机；公网访问应通过有认证的反向代理提供。
+
+前端开发时运行 `cd frontend && npm run dev`，Vite 将 `/api` 代理到本机 8000 端口。
+新增策略配置沿用 `config/*_strategy.json` 命名。
+
+验证：
+
+```bash
+.venv/bin/python -m pip install -r requirements-dev.txt
+PYTHONPATH=src .venv/bin/python -m unittest discover -s tests
+cd frontend && npm run build
+```
