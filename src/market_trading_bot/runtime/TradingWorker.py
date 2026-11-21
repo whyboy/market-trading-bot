@@ -68,12 +68,16 @@ class TradingWorker:
             raise RuntimeError('交易线程未运行')
         self.tasks.put((strategy_path, instance_id))
 
-    def _execute_trade(self, strategy_path: Path, instance_id: str):
+    def _execute_trade(self, strategy_path: Path, instance_id: str, scheduled_at=None, logger=None):
         from market_trading_bot.runner import run_pap
         execution = {'instance_id': instance_id, 'started_at': datetime.now(timezone.utc).isoformat()}
         self.status.update(state='running', current_execution=execution)
         self._heartbeat()
         try:
+            if scheduled_at is not None and not self.scheduler.load_calendar_with_retry(scheduled_at, self.stop_event, logger):
+                self.status.update(state='idle', current_execution=None)
+                self._heartbeat()
+                return None
             run_pap(self.root, strategy_path, instance_id)
             execution = {**execution, 'success': True}
         except Exception as exc:
@@ -85,10 +89,12 @@ class TradingWorker:
 
     def _run(self):
         try:
+            self.scheduler.register_jobs(self._execute_trade, self.stop_event)
+            self.status.update(self.scheduler.snapshot())
             self._heartbeat()
             self.ready.set()
             while not self.stop_event.is_set():
-                self.scheduler.tick(self._execute_trade, self.stop_event)
+                self.scheduler.run_pending()
                 self.status.update(self.scheduler.snapshot())
                 self._heartbeat()
                 try:

@@ -53,6 +53,8 @@ def runtime():
     now = datetime.now(timezone.utc)
     age = max(0, (now - datetime.fromisoformat(status['heartbeat_at'])).total_seconds())
     worker = getattr(app.state, 'worker', None)
+    if worker is not None:
+        status.update(worker.scheduler.snapshot())
     execution = status.get('current_execution')
     running = status['state'] == 'running' and execution is not None
     execution_age = max(0, (now - datetime.fromisoformat(execution['started_at'])).total_seconds()) if running else None
