@@ -16,47 +16,48 @@ ETF 动量轮动程序，启动后按交易日定时模拟调仓，并提供网�
 
 ```text
 market-trading-bot/
-├── main.py                         # 统一服务启动入口
-├── config/
-│   ├── global.json                 # 行情、存储和日志配置
-│   └── etf_rotation_strategy.json  # 策略、实例和交易规则
 ├── frontend/                       # Vue监控页面，开发端口8000
-├── src/market_trading_bot/
-│   ├── runtime/                    # 交易日调度、后台线程和运行记录
-│   ├── web/app.py                  # 网页与只读API，后端端口8001
-│   ├── strategies/
-│   │   └── ETFRotationStrategyImpl.py  # ETF 动量轮动策略
-│   ├── AKShareMarket.py            # 行情与交易日历
-│   ├── PapExecutor.py              # 模拟成交
-│   ├── PapAccountStore.py          # SQLite 账本与 CSV 导出
-│   ├── StrategyLogger.py           # 运行日志
-│   └── models.py                   # 领域数据结构
-├── tests/                          # 离线测试
-├── data/                           # 各实例账户数据
-├── reports/                        # 预留报告目录
-└── requirements.txt                # Python 依赖
+├── backend/
+│   ├── main.py                     # 后端启动入口，默认端口8001
+│   ├── requirements.txt            # Python依赖
+│   ├── config/                     # 全局与策略配置
+│   ├── src/market_trading_bot/
+│   │   ├── runtime/                # 调度、策略任务和运行状态
+│   │   ├── web/                    # 网页与只读API
+│   │   ├── strategies/             # 策略实现
+│   │   ├── AKShareMarket.py        # 行情与交易日历
+│   │   ├── PapExecutor.py          # 模拟成交
+│   │   ├── PapAccountStore.py      # 账户账本与CSV导出
+│   │   ├── StrategyLogger.py       # 策略日志
+│   │   └── models.py              # 数据结构
+│   ├── tests/                      # 离线测试
+│   └── data/                       # 账户账本与运行记录
+├── AGENTS.md
+└── README.md
 ```
 
 ## 快速开始
 
-要求 Python 3.12+。
+要求 Python 3.12+。以下命令均从项目根目录执行。
 
 ```bash
-python -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
+python -m venv backend/.venv
+backend/.venv/bin/python -m pip install -r backend/requirements.txt
 ```
 
 启动后端和每日调度服务（默认端口 `8001`）：
 
 ```bash
-.venv/bin/python main.py
+backend/.venv/bin/python backend/main.py
 ```
 
-可通过 `--host`、`--port` 调整监听地址与端口。策略配置从 `config/*_strategy.json` 加载，修改后重启生效。
+可通过 `--host`、`--port` 调整监听地址与端口。策略配置从 `backend/config/*_strategy.json` 加载，修改后重启生效。
+
+从旧版目录升级时，先停止服务，再将原 `data/`、`logs/` 内容迁入 `backend/data/`、`backend/logs/`，保留账本与历史日志。
 
 ## 配置
 
-全局配置位于 `config/global.json`：
+全局配置位于 `backend/config/global.json`：
 
 | 配置 | 用途 |
 |---|---|
@@ -66,7 +67,7 @@ python -m venv .venv
 | `runtime.trade_timeout_seconds` | 交易执行超时阈值，默认 300 秒，仅标记异常 |
 | `pushplus` | 预留配置，当前不发送推送 |
 
-策略配置位于 `config/etf_rotation_strategy.json`：
+策略配置位于 `backend/config/etf_rotation_strategy.json`：
 
 | 配置 | 默认值 | 用途 |
 |---|---|---|
@@ -87,7 +88,7 @@ python -m venv .venv
 
 ## 账户数据
 
-每个实例的数据保存在 `data/<instance_id>/`：
+每个实例的数据保存在 `backend/data/<instance_id>/`：
 
 - `ledger.sqlite3`：权威账本，保存全部运行结果、账户状态、信号、订单和成交。
 - `account_trades.csv`：可重建的查看副本，仅记录发生实际成交的日期。
@@ -115,7 +116,7 @@ python -m venv .venv
 
 ## 日志
 
-日志写入 `logs/<strategy>/YYYY-MM-DD.log`，默认保留最近 30 个有日志的日期。日志包含运行状态、行情区间、报价、策略排名、目标权重和模拟成交摘要，不记录 Token。
+日志写入 `backend/logs/<strategy>/YYYY-MM-DD.log`，默认保留最近 30 个有日志的日期。日志包含运行状态、行情区间、报价、策略排名、目标权重和模拟成交摘要，不记录 Token。
 
 ## 定时执行规则
 
@@ -124,7 +125,7 @@ python -m venv .venv
 - 9:00 后启动服务会立即补做当天的交易日判断，只安排尚未到时间的策略，不补执行已错过的任务。
 - `enable` 默认为 `true`，设为 `false` 不安排该策略。到点创建一次性的 `TradingTask` 线程，只执行策略和更新自身状态，完成后退出。
 - 同一策略的账户串行执行，不同策略互不阻塞。任务不负责交易日判断或每日调度，账户账本继续防止同日重复成交。
-- 任务状态存储在 `data/runtime/<strategy>/runtime.sqlite3`，页面显示当日计划执行时间、最近执行结果和交易日判断状态。配置修改后重启生效。
+- 任务状态存储在 `backend/data/runtime/<strategy>/runtime.sqlite3`，页面显示当日计划执行时间、最近执行结果和交易日判断状态。配置修改后重启生效。
 
 ## 网页运行监控
 
@@ -138,7 +139,7 @@ Vue 3 前端 + FastAPI 后端，支持运行状态、策略与账户概览、按
 首次安装：
 
 ```bash
-.venv/bin/python -m pip install -r requirements.txt
+backend/.venv/bin/python -m pip install -r backend/requirements.txt
 npm ci --prefix frontend
 ```
 
@@ -146,7 +147,7 @@ npm ci --prefix frontend
 
 ```bash
 # 后端：8001，自动注册每日任务
-.venv/bin/python main.py
+backend/.venv/bin/python backend/main.py
 
 # 前端：8000，浏览器打开 http://127.0.0.1:8000
 npm run dev --prefix frontend -- --port 8000 --strictPort
@@ -173,3 +174,10 @@ npm run dev --prefix frontend -- --port 8000 --strictPort
 | `/api/strategies/{strategy_id}/logs/{date}?offset=0` | 指定日期日志，返回内容及下一页偏移量 |
 
 日志日期格式为 `YYYY-MM-DD`；日志按策略归档。页面为只读，交易结果通过账户与日志查看。
+
+## 验证
+
+```bash
+PYTHONPATH=backend/src backend/.venv/bin/python -m unittest discover -s backend/tests
+npm run build --prefix frontend
+```

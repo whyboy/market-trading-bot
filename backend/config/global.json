@@ -8,8 +8,7 @@
     "history_lookback_days": 60
   },
   "storage": {
-    "data_dir": "data",
-    "reports_dir": "reports"
+    "data_dir": "data"
   },
   "pushplus": {
     "enabled": false,

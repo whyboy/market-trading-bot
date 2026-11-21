@@ -2,10 +2,8 @@ __pycache__/
 *.py[cod]
 .venv/
 .env
-data/*
-!data/.gitkeep
-reports/*
-!reports/.gitkeep
+/backend/data/*
+!/backend/data/.gitkeep
 logs/
 frontend/node_modules/
 frontend/dist/
