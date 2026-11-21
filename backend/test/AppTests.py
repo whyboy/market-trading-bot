@@ -30,7 +30,7 @@ class AppTests(unittest.TestCase):
         self.clock_patch = patch.object(TaskScheduler, 'now', return_value=datetime.now().replace(hour=8, minute=0))
         self.clock_patch.start()
         def build(scheduler, strategy_id, instance, scheduled_at):
-            return TradingTask(Mock(), Mock(), Mock(), Mock(), Mock(), strategy_id=strategy_id,
+            return TradingTask(Mock(), Mock(), Mock(), Mock(), strategy_id=strategy_id,
                                instance_id=instance['id'], initial_cash=100000, scheduled_at=scheduled_at, notifier=Mock())
         self.build_patch = patch.object(TaskScheduler, '_build_trade_task', build)
         self.build_patch.start()
@@ -69,10 +69,10 @@ class AppTests(unittest.TestCase):
         database = self.root / 'data/example_pap/ledger.sqlite3'
         database.parent.mkdir(parents=True)
         with closing(sqlite3.connect(database)) as connection, connection:
-            connection.execute('CREATE TABLE runs(day TEXT, payload TEXT)')
+            connection.execute('CREATE TABLE daily_results(day TEXT, execution_payload TEXT)')
             connection.execute('CREATE TABLE account(id INTEGER, initial_cash TEXT)')
             connection.execute("INSERT INTO account VALUES(1, '100000')")
-            connection.execute('INSERT INTO runs VALUES(?, ?)', ('2026-11-20', json.dumps({
+            connection.execute('INSERT INTO daily_results VALUES(?, ?)', ('2026-11-20', json.dumps({
                 'date': '2026-11-20', 'cash': '50000', 'equity': '101000', 'positions': {}})))
         result = self.client.get('/api/accounts/example_pap').json()
         self.assertTrue(result['initialized'])

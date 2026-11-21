@@ -33,8 +33,11 @@ market-trading-bot/
 │   │       │   ├── ETFRotationStrategyImpl.py
 │   │       │   └── StrategyData.py          # StrategyData、RankedETF
 │   │       ├── repository/                # 数据库访问
-│   │       │   ├── TaskStatusRepository.py
-│   │       │   └── PapAccountRepository.py
+│   │       │   ├── AccountRepository.py
+│   │       │   └── DailyResultsRepository.py
+│   │       ├── service/                  # 账户与每日结果服务
+│   │       │   ├── AccountService.py
+│   │       │   └── DailyResultsService.py
 │   │       ├── log/StrategyLogger.py      # 日志处理代码
 │   │       ├── market/                    # 行情适配及数据
 │   │       │   ├── AKShareMarket.py
@@ -142,7 +145,7 @@ backend/.venv/bin/python backend/main.py
 - 9:00 后启动服务会立即补做当天的交易日判断，只安排尚未到时间的策略，不补执行已错过的任务。
 - `enable` 默认为 `true`，设为 `false` 不安排该策略。到点为每个启用的策略账户创建独立 `TradingTask` 线程，完成后退出。
 - 一个策略＋一个账户对应一个 Task；账户间独立执行，同一账户不重叠。调度器为每个 Task 构建独立策略、行情、模拟执行器及 Repository 对象，Task 不读取配置、不构建业务依赖。
-- 任务状态存储在 `backend/dev/data/runtime/<strategy>/<instance_id>/runtime.sqlite3`，页面显示当日计划执行时间、最近执行结果和交易日判断状态。配置修改后重启生效。
+- 任务状态保存在内存中，页面显示当日计划执行时间、最近执行结果和交易日判断状态；服务重启后任务状态重置。配置修改后重启生效。
 
 交易执行依赖关系：
 
@@ -150,9 +153,10 @@ backend/.venv/bin/python backend/main.py
 TaskScheduler → TradingTask（绑定策略＋账户）
                     ├── Market → MarketData → Strategy → StrategyData
                     ├── PapTrader：纯内存模拟调仓
-                    ├── PapAccountRepository：账户事务与CSV导出
-                    └── TaskStatusRepository：该账户任务状态
+                    └── AccountService：账户事务与CSV导出，调用账户及每日结果 Repository
 ```
+
+每日估值和日报通过 DailyResultsService 访问每日结果。
 
 Repository 不依赖执行器。Task 在账户事务内读取最新快照、检查当日结果、调用执行器并保存；任一步失败整体回滚，保证并发防重复与资金一致性。
 网页选择账户后读取对应任务状态；未指定账户查询时汇总整个策略，任一运行账户超时都会显示异常。
@@ -237,7 +241,7 @@ Azure 网络安全组放行 TCP `8080` 后，访问 `http://<服务器公网IP>:
 
 每个账户使用独立的 `data/<instance_id>/ledger.sqlite3`，仅含两张表：
 `account` 保存账户、策略、开户资金和创建时间；`daily_results` 每天一行，分别保存交易结果、收盘估值、收益和估值状态。
-旧 `runs` 表首次写入时在事务中自动迁移，保留交易及开户资金；旧账户无法还原的创建时间留空。估值只更新收盘字段，不覆盖交易结果。
+估值只更新收盘字段，不覆盖交易结果。
 收盘价尚未更新、日历异常或任务仍在执行时，间隔 30 秒最多尝试 3 次；15:10 汇总时按保存的状态标注未执行、执行中或失败，不影响其他账户；不使用旧价格代替当天收盘价。
 未开户发送“暂无收益数据”；当天策略未完成记账时，按现有持仓估值并注明。
 
