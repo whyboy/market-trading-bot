@@ -82,6 +82,7 @@ class TaskScheduler:
             # 每 5 秒更新服务心跳。
             self.timer.add_job(self._heartbeat, 'interval', seconds=5, id='_heartbeat')
             self.timer.start()
+            # 启动时先准备当天日历；晚于收盘估值时间启动时补做估值和日报。
             self.prepare_calender_context()
             if self.now().time() >= time(15, 5):
                 self.timer.add_job(self._recover_daily, args=[self.now().date()], id='_startup_daily_tasks')
