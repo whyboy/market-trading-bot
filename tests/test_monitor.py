@@ -3,13 +3,12 @@ import json
 import sqlite3
 import tempfile
 import threading
-import time
 import unittest
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
-from market_trading_bot.runtime.RuntimeStore import RuntimeStore
-from market_trading_bot.runtime.TradingWorker import TradingWorker
+from market_trading_bot.runtime.TradingScheduler import TradingScheduler
+from market_trading_bot.runtime.TradingTask import TradingTask
 from market_trading_bot.web import app as web
 from pathlib import Path
 from unittest.mock import patch
@@ -21,14 +20,17 @@ class MonitorTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         (self.root / 'config').mkdir()
         (self.root / 'config/global.json').write_text(json.dumps({
-            'storage': {'data_dir': 'data'}, 'logging': {'directory': 'logs'}}))
+            'storage': {'data_dir': 'data'}, 'logging': {'directory': 'logs', 'level': 'INFO', 'retention_dates': 30}}))
         (self.root / 'config/example_strategy.json').write_text(json.dumps({
-            'strategy': 'example', 'instances': [{'id': 'example_pap', 'mode': 'pap', 'enabled': True}]}))
+            'strategy': 'example', 'schedule': {'trade_time': '14:30'}, 'instances': [{'id': 'example_pap', 'mode': 'pap', 'enabled': False}]}))
         self.patch = patch.object(web, 'ROOT', self.root)
         self.patch.start()
         self.client = TestClient(web.app)
+        self.clock_patch = patch.object(TradingScheduler, 'now', return_value=datetime.now().replace(hour=8, minute=0))
+        self.clock_patch.start()
 
     def tearDown(self):
+        self.clock_patch.stop()
         self.patch.stop()
         self.temporary.cleanup()
 
@@ -36,18 +38,6 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/accounts/example_pap').json(), {'initialized': False})
         self.assertFalse((self.root / 'data').exists())
         self.assertEqual(self.client.get('/api/accounts/unknown').status_code, 404)
-
-    def test_heartbeat_staleness_and_stop(self):
-        self.assertFalse(self.client.get('/api/runtime').json()['online'])
-        now = datetime.now(timezone.utc)
-        store = RuntimeStore(self.root)
-        status = {'state': 'idle', 'started_at': now.isoformat(), 'heartbeat_at': now.isoformat()}
-        store.write(status)
-        self.assertTrue(self.client.get('/api/runtime').json()['online'])
-        store.write({**status, 'heartbeat_at': (now - timedelta(seconds=30)).isoformat()})
-        self.assertFalse(self.client.get('/api/runtime').json()['online'])
-        store.write({**status, 'state': 'stopped'})
-        self.assertFalse(self.client.get('/api/runtime').json()['online'])
 
     def test_logs_are_ordered_paginated_and_validated(self):
         directory = self.root / 'logs/example'
@@ -82,84 +72,103 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(result['initial_cash'], '100000')
         self.assertEqual(result['equity'], '101000')
 
-    def test_web_manages_worker_lifecycle(self):
+    def test_service_registers_jobs_without_starting_trade_threads(self):
         with TestClient(web.app) as client:
-            worker = web.app.state.worker
-            self.assertTrue(worker.thread.is_alive())
-            self.assertTrue(client.get('/api/runtime').json()['online'])
-            self.assertFalse((self.root / 'data/example_pap').exists())
-            duplicate = TradingWorker(self.root)
+            scheduler = web.app.state.scheduler
+            self.assertEqual(scheduler.tasks, {})
+            self.assertTrue(scheduler.timer.running)
+            result = client.get('/api/runtime?strategy_id=example').json()
+            self.assertEqual(result['state'], 'idle')
+            self.assertTrue(result['online'])
+            self.assertEqual(result['heartbeat_scope'], 'scheduler')
+        self.assertFalse(scheduler.timer.running)
+
+    def test_disabled_strategy_is_not_registered(self):
+        path = self.root / 'config/example_strategy.json'
+        config = json.loads(path.read_text())
+        config['enable'] = False
+        path.write_text(json.dumps(config))
+        with TestClient(web.app) as client:
+            self.assertEqual(web.app.state.scheduler.jobs, {})
+            self.assertEqual(client.get('/api/runtime?strategy_id=example').json()['state'], 'disabled')
+
+    def test_duplicate_service_is_rejected_and_lock_released_after_shutdown(self):
+        with TestClient(web.app):
+            duplicate = TradingScheduler(self.root)
             with self.assertRaisesRegex(RuntimeError, '只启动一个后端实例'):
                 duplicate.start()
-        self.assertFalse(worker.thread.is_alive())
-        self.assertEqual(RuntimeStore(self.root).read()['state'], 'stopped')
-        # 退出后释放文件锁，支持再次启动。
         with TestClient(web.app) as client:
-            self.assertTrue(client.get('/api/runtime').json()['online'])
+            self.assertTrue(client.get('/api/runtime?strategy_id=example').json()['online'])
 
-    def test_dead_worker_is_offline_even_with_fresh_heartbeat(self):
-        with TestClient(web.app) as client:
-            worker = web.app.state.worker
-            worker.stop()
-            now = datetime.now(timezone.utc).isoformat()
-            worker.store.write({**worker.status, 'state': 'idle', 'heartbeat_at': now})
-            self.assertFalse(client.get('/api/runtime').json()['online'])
-            self.assertEqual(client.get('/api/strategies').status_code, 200)
-
-    def test_trade_and_heartbeat_share_thread_with_separate_timeout(self):
+    def test_active_task_has_its_own_heartbeat_and_timeout(self):
+        path = self.root / 'config/example_strategy.json'
+        config = json.loads(path.read_text())
+        config['instances'][0]['enabled'] = True
+        path.write_text(json.dumps(config))
         entered = threading.Event()
         release = threading.Event()
-        thread_ids = []
 
         def trade(*args):
-            thread_ids.append(threading.get_ident())
             entered.set()
-            if not release.wait(3):
-                raise TimeoutError('测试未释放交易')
+            release.wait(3)
 
-        with patch('market_trading_bot.runner.run_pap', side_effect=trade):
+        with patch('market_trading_bot.runtime.TradingTask.TradingTask.run_pap', side_effect=trade):
             with TestClient(web.app) as client:
-                worker = web.app.state.worker
-                worker.submit_trade(self.root / 'config/example_strategy.json', 'example_pap')
+                scheduler = web.app.state.scheduler
+                scheduler.calendar_day = scheduler.now().date()
+                scheduler.is_trading_day = True
+                scheduler._start_task(path)
                 try:
                     self.assertTrue(entered.wait(2))
-                    stored = worker.store.read()
-                    self.assertEqual(stored['state'], 'running')
-                    self.assertEqual(thread_ids, [worker.thread.ident])
-                    # 模拟执行已过 30 秒：待命阈值已过，但未到交易阈值。
-                    old = (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat()
-                    stored['heartbeat_at'] = old
-                    stored['current_execution']['started_at'] = old
-                    worker.store.write(stored)
-                    self.assertTrue(client.get('/api/runtime').json()['online'])
-                    self.assertEqual(worker.store.read()['heartbeat_at'], old)
-                    stored['trade_timeout_seconds'] = 10
-                    worker.store.write(stored)
-                    result = client.get('/api/runtime').json()
-                    self.assertFalse(result['online'])
+                    result = client.get('/api/runtime?strategy_id=example').json()
+                    self.assertEqual(result['state'], 'running')
+                    self.assertEqual(result['heartbeat_scope'], 'task')
+                    task = scheduler.tasks['example']
+                    heartbeat = task.status['heartbeat_at']
+                    task.status['current_execution'] = {**task.status['current_execution'],
+                        'started_at': (datetime.now(timezone.utc) - timedelta(seconds=301)).isoformat()}
+                    scheduler._heartbeat()
+                    result = client.get('/api/runtime?strategy_id=example').json()
                     self.assertEqual(result['health'], 'trade_timeout')
-                    self.assertEqual(client.get('/api/strategies').status_code, 200)
+                    self.assertFalse(result['online'])
+                    self.assertEqual(task.status['heartbeat_at'], heartbeat)
                 finally:
                     release.set()
-                deadline = time.monotonic() + 2
-                while time.monotonic() < deadline and not worker.store.read()['last_execution']:
-                    time.sleep(.01)
-                result = client.get('/api/runtime').json()
-                self.assertTrue(result['last_execution']['success'])
+                    scheduler.tasks['example'].thread.join(timeout=2)
+                result = client.get('/api/runtime?strategy_id=example').json()
                 self.assertEqual(result['state'], 'idle')
+                self.assertTrue(result['last_execution']['success'])
                 self.assertTrue(result['online'])
 
-    def test_failed_trade_records_error_and_worker_remains_available(self):
-        with patch('market_trading_bot.runner.run_pap', side_effect=ValueError('行情无效')):
-            with TestClient(web.app) as client:
-                worker = web.app.state.worker
-                worker.submit_trade(self.root / 'config/example_strategy.json', 'example_pap')
-                deadline = time.monotonic() + 2
-                while time.monotonic() < deadline and not worker.store.read()['last_execution']:
-                    time.sleep(.01)
-                result = client.get('/api/runtime').json()
-                self.assertFalse(result['last_execution']['success'])
-                self.assertEqual(result['last_execution']['error'], '行情无效')
-                self.assertTrue(result['last_execution']['finished_at'])
-                self.assertEqual(result['state'], 'idle')
-                self.assertTrue(result['online'])
+    def test_one_strategy_does_not_block_another(self):
+        first = self.root / 'config/example_strategy.json'
+        config = json.loads(first.read_text())
+        config['instances'][0]['enabled'] = True
+        first.write_text(json.dumps(config))
+        second = self.root / 'config/second_strategy.json'
+        second.write_text(json.dumps({'strategy': 'second', 'schedule': {'trade_time': '14:30'},
+                                     'instances': [{'id': 'second_pap', 'enabled': True}]}))
+        entered = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+
+        def trade(instance_id):
+            if instance_id == 'example_pap':
+                entered.set()
+                release.wait(3)
+            else:
+                finished.set()
+
+        with patch('market_trading_bot.runtime.TradingTask.TradingTask.run_pap', side_effect=trade):
+            with TestClient(web.app):
+                scheduler = web.app.state.scheduler
+                scheduler.calendar_day = scheduler.now().date()
+                scheduler.is_trading_day = True
+                scheduler._start_task(first)
+                try:
+                    self.assertTrue(entered.wait(2))
+                    scheduler._start_task(second)
+                    self.assertTrue(finished.wait(2))
+                    self.assertNotEqual(scheduler.tasks['example'].thread.ident, scheduler.tasks['second'].thread.ident)
+                finally:
+                    release.set()

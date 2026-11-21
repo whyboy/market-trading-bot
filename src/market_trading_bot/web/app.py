@@ -4,12 +4,11 @@ import re
 import sqlite3
 from asyncio import to_thread
 from contextlib import asynccontextmanager, closing
-from datetime import date, datetime, timezone
+from datetime import date
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from market_trading_bot.runtime.RuntimeStore import RuntimeStore
-from market_trading_bot.runtime.TradingWorker import TradingWorker
+from market_trading_bot.runtime.TradingScheduler import TradingScheduler
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -17,14 +16,14 @@ ROOT = Path(__file__).resolve().parents[3]
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    worker = TradingWorker(ROOT)
-    worker.start()
-    application.state.worker = worker
+    scheduler = TradingScheduler(ROOT)
+    scheduler.start()
+    application.state.scheduler = scheduler
     try:
         yield
     finally:
-        await to_thread(worker.stop)
-        application.state.worker = None
+        await to_thread(scheduler.stop)
+        application.state.scheduler = None
 
 
 app = FastAPI(title='交易程序监控', docs_url=None, redoc_url=None, lifespan=lifespan)
@@ -46,31 +45,21 @@ def strategy_by_id(strategy_id):
 
 
 @app.get('/api/runtime')
-def runtime():
-    status = RuntimeStore(ROOT).read()
-    if status is None:
+def runtime(strategy_id: str | None = None):
+    configurations = strategies()
+    if not configurations:
         return {'state': 'unknown', 'online': False}
-    now = datetime.now(timezone.utc)
-    age = max(0, (now - datetime.fromisoformat(status['heartbeat_at'])).total_seconds())
-    worker = getattr(app.state, 'worker', None)
-    execution = status.get('current_execution')
-    running = status['state'] == 'running' and execution is not None
-    execution_age = max(0, (now - datetime.fromisoformat(execution['started_at'])).total_seconds()) if running else None
-    timed_out = running and execution_age > status.get('trade_timeout_seconds', 300)
-    online = (not timed_out if running else age <= 20) and status['state'] != 'stopped'
-    health = 'trade_timeout' if timed_out else 'heartbeat_timeout' if not online and status['state'] != 'stopped' else status['state']
-    if worker is not None:
-        if not worker.thread.is_alive():
-            online = False
-            health = 'stopped'
-    return {**status, 'online': online, 'health': health, 'execution_age_seconds': execution_age,
-            'heartbeat_age_seconds': age,
-            'uptime_seconds': max(0, (now - datetime.fromisoformat(status['started_at'])).total_seconds()) if online else None}
+    configuration = strategy_by_id(strategy_id) if strategy_id else configurations[0]
+    strategy_id = configuration['strategy']
+    if not configuration.get('enable', True):
+        return {'strategy': strategy_id, 'state': 'disabled', 'online': False}
+    scheduler = getattr(app.state, 'scheduler', None) or TradingScheduler(ROOT)
+    return scheduler.get_status(strategy_id)
 
 
 @app.get('/api/strategies')
 def list_strategies():
-    return [{'id': item['strategy'], 'instances': [
+    return [{'id': item['strategy'], 'enable': item.get('enable', True), 'instances': [
         {'id': instance['id'], 'mode': instance['mode'], 'enabled': instance['enabled']}
         for instance in item.get('instances', [])]} for item in strategies()]
 

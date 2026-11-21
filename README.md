@@ -1,12 +1,12 @@
 # market-trading-bot
 
-ETF 动量轮动工具，支持实时信号预览、手动模拟调仓和网页运行监控。模拟账户使用 SQLite 原子记账，可恢复、可防止同日重复成交，并导出账户交易汇总 CSV。
+ETF 动量轮动程序，启动后按交易日定时模拟调仓，并提供网页运行监控。模拟账户使用 SQLite 原子记账，可恢复、可防止同日重复成交，并导出账户交易汇总 CSV。
 
-当前仅实现 `etf_rotation` 策略和 `pap` 模拟模式。定时任务、收盘日报和推送尚未实现。
+当前仅实现 `etf_rotation` 策略和 `pap` 模拟模式。已支持定时调仓，收盘日报和推送尚未实现。
 
 ## 策略简介
 
-目标运行节奏是每个 A 股交易日 **14:30 调仓，15:15 生成并推送收盘日报**；定时任务接入前需手动执行。
+每个 A 股交易日北京时间 **14:30 自动模拟调仓**；**15:15 日报和推送**为后续功能，暂不执行。
 
 策略每天对 ETF 池计算动量和波动率：用最近 24 个交易日收盘价加当前价做回归，以“年化收益 × 拟合优度”作为动量得分，选择得分最高的 ETF；再按“15% 目标年化波动率 ÷ 标的波动率”确定仓位，最高 100%。执行时按调仓前净资产计算目标数量，先卖后买，并应用交易单位、T+1、佣金、滑点和现金约束。
 
@@ -16,20 +16,21 @@ ETF 动量轮动工具，支持实时信号预览、手动模拟调仓和网页�
 
 ```text
 market-trading-bot/
-├── main.py                         # 命令行入口
+├── main.py                         # 统一服务启动入口
 ├── config/
 │   ├── global.json                 # 行情、存储和日志配置
 │   └── etf_rotation_strategy.json  # 策略、实例和交易规则
+├── frontend/                       # Vue监控页面，开发端口8000
 ├── src/market_trading_bot/
+│   ├── runtime/                    # 交易日调度、后台线程和运行记录
+│   ├── web/app.py                  # 网页与只读API，后端端口8001
 │   ├── strategies/
-│   │   └── ETFRotationStrategy.py  # ETF 动量轮动策略
+│   │   └── ETFRotationStrategyImpl.py  # ETF 动量轮动策略
 │   ├── AKShareMarket.py            # 行情与交易日历
 │   ├── PapExecutor.py              # 模拟成交
 │   ├── PapAccountStore.py          # SQLite 账本与 CSV 导出
 │   ├── StrategyLogger.py           # 运行日志
-│   ├── models.py                   # 领域数据结构
-│   ├── report.py                   # 预留日报模块
-│   └── runner.py                   # 运行流程协调
+│   └── models.py                   # 领域数据结构
 ├── tests/                          # 离线测试
 ├── data/                           # 各实例账户数据
 ├── reports/                        # 预留报告目录
@@ -45,25 +46,13 @@ python -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 ```
 
-预览信号，不下单、不写账户：
+启动后端和每日调度服务（默认端口 `8001`）：
 
 ```bash
 .venv/bin/python main.py
 ```
 
-执行指定模拟实例并记账：
-
-```bash
-.venv/bin/python main.py --pap etf_rotation_pap
-```
-
-指定其他策略配置：
-
-```bash
-.venv/bin/python main.py --config config/example.json
-```
-
-成功时结果以 JSON 输出到 stdout；日志和错误输出到 stderr，失败退出码为 `1`。
+可通过 `--host`、`--port` 调整监听地址与端口。策略配置从 `config/*_strategy.json` 加载，修改后重启生效。
 
 ## 配置
 
@@ -74,12 +63,14 @@ python -m venv .venv
 | `market` | 行情源、请求超时与间隔、报价最大延迟、历史回溯天数 |
 | `storage.data_dir` | SQLite 账本与 CSV 目录 |
 | `logging` | 日志目录、级别和保留日期数 |
+| `runtime.trade_timeout_seconds` | 交易执行超时阈值，默认 300 秒，仅标记异常 |
 | `pushplus` | 预留配置，当前不发送推送 |
 
 策略配置位于 `config/etf_rotation_strategy.json`：
 
 | 配置 | 默认值 | 用途 |
 |---|---|---|
+| `enable` | `true`（省略时默认启用） | 是否为此策略创建 TradingTask 线程 |
 | `strategy` | `etf_rotation` | 策略类型 |
 | `instances` | `etf_rotation_pap`；开户资金 100,000 元；佣金率 0.02%；最低佣金 5 元；滑点 0 | 模拟账户与交易费用 |
 | `parameters.etf_pool` | `518880.XSHG`、`513100.XSHG`、`159915.XSHE`、`510180.XSHG` | ETF 池 |
@@ -89,7 +80,7 @@ python -m venv .venv
 | `parameters.annualization_days` | `250` | 年化交易日数量 |
 | `parameters.select_num` | `1` | 选择排名第一的 ETF |
 | `instruments` | 每手 100 份；黄金 ETF、纳指 ETF 为 T+0，创业板 ETF、上证 180 ETF 为 T+1 | 交易单位和卖出规则 |
-| `schedule.trade_time` | `14:30` | 调仓时间，当前需手动执行 |
+| `schedule.trade_time` | `14:30` | 北京时间自动调仓时间 |
 | `schedule.report_time` | `15:15` | 收盘日报时间，当前尚未实现 |
 
 `initial_cash` 仅在首次开户时使用并保存到账本；后续修改配置不会改变账户基准。PushPlus Token 等凭据不要提交到仓库。
@@ -126,10 +117,19 @@ python -m venv .venv
 
 日志写入 `logs/<strategy>/YYYY-MM-DD.log`，默认保留最近 30 个有日志的日期。日志包含运行状态、行情区间、报价、策略排名、目标权重和模拟成交摘要，不记录 Token。
 
-## 网页运行监控（第一版）
+## 定时执行规则
+
+- `TradingScheduler` 每天北京时间 **9:00** 加载交易日历，失败每隔 5 秒重试，停止服务或到 15:00 时结束重试。
+- 确认当天为交易日后，按各策略 `schedule.trade_time`（默认 `14:30`）注册当天执行时间；休市日不注册、不创建任务。
+- 9:00 后启动服务会立即补做当天的交易日判断，只安排尚未到时间的策略，不补执行已错过的任务。
+- `enable` 默认为 `true`，设为 `false` 不安排该策略。到点创建一次性的 `TradingTask` 线程，只执行策略和更新自身状态，完成后退出。
+- 同一策略的账户串行执行，不同策略互不阻塞。任务不负责交易日判断或每日调度，账户账本继续防止同日重复成交。
+- 任务状态存储在 `data/runtime/<strategy>/runtime.sqlite3`，页面显示当日计划执行时间、最近执行结果和交易日判断状态。配置修改后重启生效。
+
+## 网页运行监控
 
 Vue 3 前端 + FastAPI 后端，支持运行状态、策略与账户概览、按日期查看和刷新日志。
-账户展示最近调仓估值，非实时估值；暂不支持定时调度和日报。
+账户展示最近调仓估值，非实时估值；收盘日报暂未实现。
 
 ### 端口与启动
 
@@ -145,17 +145,17 @@ npm ci --prefix frontend
 开发时分别在两个终端启动：
 
 ```bash
-# 后端：8001，自动启动后台交易线程
-.venv/bin/python -m uvicorn market_trading_bot.web.app:app --app-dir src --host 127.0.0.1 --port 8001
+# 后端：8001，自动注册每日任务
+.venv/bin/python main.py
 
 # 前端：8000，浏览器打开 http://127.0.0.1:8000
 npm run dev --prefix frontend -- --port 8000 --strictPort
 ```
 
-前端将 `/api` 请求代理到后端 `8001`。后台线程待命时每 5 秒更新心跳，执行交易时暂停心跳，完成后记录结果并恢复心跳；线程随服务启停。
+前端将 `/api` 请求代理到后端 `8001`。调度服务每 5 秒更新自身心跳；执行期间页面显示任务线程的心跳，任务结束后显示等待下次执行。任务线程在策略执行前后更新心跳，不另外创建心跳线程。
 待命超过 20 秒未更新心跳判定失联；交易执行超时由 `runtime.trade_timeout_seconds` 配置，默认 300 秒。
 超时只标记异常，不会强制中断或重试交易。
-后端仅启动一个实例（不要增加 `--workers`）；启动和重启不会自动调仓，手动调仓沿用 `main.py --pap etf_rotation_pap`。
+后端仅启动一个实例；启动后按上述定时规则自动调仓。服务正常关闭时等待正在执行的交易结束，不再启动新任务。
 
 部署时执行 `npm run build --prefix frontend`，只需启动一个后端服务，
 通过 `http://127.0.0.1:8001` 同时访问页面与 API，无需启动前端开发服务。
@@ -166,10 +166,10 @@ npm run dev --prefix frontend -- --port 8000 --strictPort
 
 | 路径 | 功能 |
 |---|---|
-| `/api/runtime` | 后台交易线程启动时间、运行时长与心跳 |
+| `/api/runtime?strategy_id=etf_rotation` | 后台交易线程状态、心跳、各账户当日计划执行时间与最近结果 |
 | `/api/strategies` | 策略与账户实例列表 |
 | `/api/accounts/{instance_id}` | 最近账户资产与持仓 |
 | `/api/strategies/{strategy_id}/logs` | 日志日期列表，按日期倒序 |
 | `/api/strategies/{strategy_id}/logs/{date}?offset=0` | 指定日期日志，返回内容及下一页偏移量 |
 
-日志日期格式为 `YYYY-MM-DD`；日志按策略归档。手动调仓结果通过账户与日志查看。后台线程提供内部 `submit_trade()` 入口，供后续调度接入，页面仍为只读。
+日志日期格式为 `YYYY-MM-DD`；日志按策略归档。页面为只读，交易结果通过账户与日志查看。

@@ -6,8 +6,7 @@ import pandas as pd
 import unittest
 from datetime import datetime, timedelta
 from market_trading_bot.AKShareMarket import AKShareMarket, MarketDataError
-from market_trading_bot.runner import preview_signals
-from market_trading_bot.strategies.ETFRotationStrategy import ETFRotationStrategy
+from market_trading_bot.strategies.ETFRotationStrategyImpl import ETFRotationStrategyImpl
 from pathlib import Path
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
@@ -22,7 +21,7 @@ class SignalTests(unittest.TestCase):
         self.settings = json.loads((ROOT / 'config/global.json').read_text())['market']
         self.settings['request_interval_seconds'] = 0
         parameters = json.loads((ROOT / 'config/etf_rotation_strategy.json').read_text())['parameters']
-        self.strategy = ETFRotationStrategy(parameters)
+        self.strategy = ETFRotationStrategyImpl(parameters)
         self.days = pd.bdate_range(end=NOW.date() - timedelta(days=1), periods=self.strategy.history_points)
         self.daily = pd.DataFrame({'日期': self.days, '收盘': [100 * math.exp(i * .001) for i in range(len(self.days))]})
         self.quotes = [
@@ -77,14 +76,6 @@ class SignalTests(unittest.TestCase):
                 with self.assertRaises(MarketDataError):
                     self.load(symbols)
 
-    def test_preview_signals_uses_validated_market_data(self):
-        as_of, snapshots = self.load()
-        with patch('market_trading_bot.runner.AKShareMarket') as market, \
-                patch('market_trading_bot.runner.strategy_logging'):
-            market.return_value.load.return_value = as_of, snapshots
-            result = preview_signals(ROOT, ROOT / 'config/etf_rotation_strategy.json')
-        self.assertEqual(result['operation'], 'signal_preview')
-        self.assertEqual(set(result['target_weights']), set(self.strategy.symbols))
 
 
 if __name__ == '__main__':
