@@ -26,7 +26,9 @@ market-trading-bot/
 │   │   ├── logs/                          # 运行日志，启动后生成
 │   │   └── market_trading_bot/
 │   │       ├── TradingScheduler.py        # 交易日判断与任务调度
-│   │       ├── models.py
+│   │       ├── model/                      # 共享数据结构，不依赖业务模块
+│   │       │   ├── MarketSnapshot.py        # MarketSnapshot、DailyClose
+│   │       │   └── StrategyResult.py        # StrategyResult、RankedETF
 │   │       ├── task/TradingTask.py         # 单次策略执行及状态更新
 │   │       ├── strategy/                  # 策略实现
 │   │       │   └── ETFRotationStrategyImpl.py

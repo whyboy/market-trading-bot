@@ -2,7 +2,8 @@
 import math
 import numpy as np
 from datetime import datetime
-from market_trading_bot.models import MarketSnapshot, RankedETF, StrategyResult
+from market_trading_bot.model.MarketSnapshot import MarketSnapshot
+from market_trading_bot.model.StrategyResult import RankedETF, StrategyResult
 
 
 class ETFRotationStrategyImpl:

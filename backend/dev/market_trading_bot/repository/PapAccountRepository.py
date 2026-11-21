@@ -8,7 +8,7 @@ from contextlib import closing
 from dataclasses import asdict
 from decimal import Decimal
 from market_trading_bot.execution.PapExecutor import PapExecutor
-from market_trading_bot.models import StrategyResult
+from market_trading_bot.model.StrategyResult import StrategyResult
 from pathlib import Path
 
 

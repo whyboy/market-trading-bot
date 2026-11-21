@@ -1,7 +1,7 @@
 """模拟账户核心测试使用的共同数据。"""
 from datetime import datetime, timedelta
 from market_trading_bot.execution.PapExecutor import PapExecutor
-from market_trading_bot.models import RankedETF, StrategyResult
+from market_trading_bot.model.StrategyResult import RankedETF, StrategyResult
 from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
 from pathlib import Path
 from tempfile import TemporaryDirectory

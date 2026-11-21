@@ -8,7 +8,7 @@ import requests
 import time as clock
 from akshare.utils.context import config as ak_config
 from datetime import datetime, time, timedelta
-from market_trading_bot.models import DailyClose, MarketSnapshot
+from market_trading_bot.model.MarketSnapshot import DailyClose, MarketSnapshot
 from zoneinfo import ZoneInfo
 
 SHANGHAI = ZoneInfo('Asia/Shanghai')
