@@ -36,7 +36,7 @@ class TaskScheduler:
         self.valuation_task = None
         self.valuation_day = None
         self.valuation_lock = threading.Lock()
-        self.daily_context = None
+        self.calendar_context = None
         self.summary_lock = threading.Lock()
         self.reported_day = None
         self.timer = BackgroundScheduler(timezone=SHANGHAI)
@@ -65,7 +65,12 @@ class TaskScheduler:
                 if config.get('enable', True):
                     strategy_id = config['strategy']
                     self.configs[strategy_id] = config
-            # 每天北京时间 9:00 确认交易日并安排交易。
+            for strategy_id, config in self.configs.items():
+                trade_time = time.fromisoformat(config['schedule']['trade_time'])
+                self.timer.add_job(self._start_trades, 'cron', hour=trade_time.hour, minute=trade_time.minute,
+                                   second=trade_time.second, args=[strategy_id], id=strategy_id,
+                                   coalesce=True, max_instances=1, misfire_grace_time=5)
+            # 每天北京时间 9:00 确认交易日。
             self.timer.add_job(self.prepare_calender_context, 'cron', hour=9, minute=0, id='_calendar',
                                coalesce=True, max_instances=1, misfire_grace_time=300)
             # 每天北京时间 15:05 更新收盘估值。
@@ -78,12 +83,14 @@ class TaskScheduler:
             self.timer.add_job(self._heartbeat, 'interval', seconds=5, id='_heartbeat')
             self.timer.start()
             self.prepare_calender_context()
+            if self.now().time() >= time(15, 5):
+                self.timer.add_job(self._recover_daily, args=[self.now().date()], id='_startup_daily_tasks')
         except BaseException:
             self.stop()
             raise
 
     def prepare_calender_context(self):
-        """获取当天交易日历，交易日注册任务；休市日仅记录状态。"""
+        """获取当天交易日历并保存交易日状态。"""
         if not self.configs or not self.calendar_lock.acquire(blocking=False):
             return
         try:
@@ -95,13 +102,12 @@ class TaskScheduler:
                 return
             if context is None:
                 return
+            self.calendar_context = context
             self.calendar_day = today
             self.is_trading_day = context['is_trading_day']
-            if self.is_trading_day:
-                self._register_daily_tasks(today)
-            else:
-                logging.getLogger(__name__).info('%s 非交易日，跳过交易、估值和日报', today)
             self.calendar_prepared_date = today
+            if not self.is_trading_day:
+                logging.getLogger(__name__).info('%s 非交易日，跳过交易、估值和日报', today)
         finally:
             self.calendar_lock.release()
 
@@ -116,23 +122,12 @@ class TaskScheduler:
             except Exception as exc:
                 attempts += 1
                 self.calendar_error = str(exc)
-                logging.getLogger(__name__).warning('交易日历加载失败：%s', exc)
+                logging.getLogger(__name__).error('交易日历加载失败：%s', exc)
                 if (started_after_close and attempts >= 3) or self.stop_event.wait(5):
                     return None
                 if not started_after_close and self.now().time() >= time(15):
                     return None
         return None
-
-    def _register_daily_tasks(self, day):
-        """注册当天尚未到点的交易；晚启动补执行估值和日报。"""
-        now = self.now()
-        for strategy_id, config in self.configs.items():
-            due = datetime.combine(day, time.fromisoformat(config['schedule']['trade_time']), SHANGHAI)
-            if due > now:
-                self.timer.add_job(self._start_trades, 'date', run_date=due, args=[strategy_id, day],
-                                   id=strategy_id, replace_existing=True, misfire_grace_time=5)
-        if now.time() >= time(15, 5):
-            self.timer.add_job(self._recover_daily, args=[day], id='_startup_daily_tasks', replace_existing=True)
 
     def _recover_daily(self, scheduled_day=None):
         """晚启动先补估值；已过15:10时等待补估值结束再发送当天日报。"""
@@ -155,9 +150,9 @@ class TaskScheduler:
                 return
             if self.valuation_task is not None and self.valuation_task.thread.is_alive():
                 return
-            context = self._daily_calendar(day)
+            context = self._trading_day_context(day)
             if (self.stop_event.is_set() or self.now().date() != day
-                    or not context.get('is_trading_day', False)):
+                    or context is None):
                 return
             task = DailyValuationTask(self.root, self.settings, self.configs, context,
                                       self.stop_event, self._is_trading, self.now)
@@ -178,9 +173,9 @@ class TaskScheduler:
                 return
             if self.summary_task is not None and self.summary_task.thread.is_alive():
                 return
-            context = self._daily_calendar(day)
+            context = self._trading_day_context(day)
             if (self.stop_event.is_set() or self.now().date() != day
-                    or not context.get('is_trading_day', False)):
+                    or context is None):
                 return
             task = DailySummaryTask(self.root, self.settings, self.configs, self.notifier, context,
                                     self.stop_event, self.now)
@@ -190,25 +185,15 @@ class TaskScheduler:
         finally:
             self.summary_lock.release()
 
-    def _daily_calendar(self, day):
-        """获取当天日历，最多尝试 3 次；缓存结果或失败提示。"""
-        if self.daily_context is not None and self.daily_context['day'] == day:
-            return self.daily_context
-        market = AKShareMarket(self.settings['market'])
-        for attempt in range(3):
-            try:
-                context = self._load_calendar(day, market)
-                break
-            except Exception as exc:
-                self.calendar_error = str(exc)
-                logging.getLogger(__name__).warning('每日任务日历加载失败：%s', exc)
-                if attempt == 2 or self.stop_event.wait(30):
-                    context = {'day': day, 'notice': '交易日历获取失败，未生成收益估值，请查看日志。'}
-                    break
-        if 'notice' not in context:
-            self.calendar_day = day
-            self.is_trading_day = context['is_trading_day']
-        self.daily_context = context
+    def _trading_day_context(self, day):
+        """仅允许执行使用当天已准备完成的交易日日历。"""
+        context = self.calendar_context
+        if context is None or context['day'] != day:
+            logging.getLogger(__name__).warning('%s 交易日历未准备成功，跳过任务', day)
+            return None
+        if not context['is_trading_day']:
+            logging.getLogger(__name__).info('%s 非交易日，跳过任务', day)
+            return None
         return context
 
     def _load_calendar(self, day, market):
@@ -230,13 +215,16 @@ class TaskScheduler:
             task = self.tasks.get((strategy_id, instance_id))
         return task is not None and task.thread.is_alive()
 
-    def _start_trades(self, strategy_id, day):
+    def _start_trades(self, strategy_id, day=None):
         """为启用账户启动独立交易任务，跳过仍在运行的账户。"""
+        today = self.now().date()
+        if self.stop_event.is_set() or (day is not None and day != today) or self._trading_day_context(today) is None:
+            return
         with self.tasks_lock:
-            if self.stop_event.is_set() or not self.is_trading_day or day != self.now().date() or self.calendar_day != day:
+            if self.stop_event.is_set() or self.now().date() != today:
                 return
             config = self.configs[strategy_id]
-            scheduled_at = datetime.combine(day, time.fromisoformat(config['schedule']['trade_time']), SHANGHAI)
+            scheduled_at = datetime.combine(today, time.fromisoformat(config['schedule']['trade_time']), SHANGHAI)
             for instance in config.get('instances', []):
                 if not instance['enabled']:
                     continue
