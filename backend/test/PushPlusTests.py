@@ -3,9 +3,9 @@ import tempfile
 import unittest
 from datetime import datetime
 from market_trading_bot.market.AKShareMarket import SHANGHAI
-from market_trading_bot.PushPlusClient import PushPlusClient
-from market_trading_bot.PushPlusNotifier import PushPlusNotifier
-from market_trading_bot.TradingReport import TradingReport
+from market_trading_bot.notification.PushPlusClient import PushPlusClient
+from market_trading_bot.notification.PushPlusNotifier import PushPlusNotifier
+from market_trading_bot.notification.TradingReport import TradingReport
 from market_trading_bot.TradingTask import TradingTask
 from pathlib import Path
 from types import SimpleNamespace
@@ -97,7 +97,7 @@ class PushPlusTests(unittest.TestCase):
 
     def test_client_checks_application_code_and_hides_response(self):
         client = PushPlusClient('test-secret')
-        with patch('market_trading_bot.PushPlusClient.requests.post', return_value=Mock(
+        with patch('market_trading_bot.notification.PushPlusClient.requests.post', return_value=Mock(
                 status_code=200, json=lambda: {'code': 903, 'msg': 'test-secret'})) as post:
             with self.assertRaises(PushPlusClient.Error) as error:
                 client.send('title', 'content')
@@ -122,7 +122,7 @@ class PushPlusTests(unittest.TestCase):
         enqueue.assert_called_once()
 
     def test_database_failure_does_not_prevent_service_setup(self):
-        with patch('market_trading_bot.PushPlusNotifier.NotificationRepository', side_effect=OSError('disk full')):
+        with patch('market_trading_bot.notification.PushPlusNotifier.NotificationRepository', side_effect=OSError('disk full')):
             self.assertIsNone(PushPlusNotifier(self.root, self.settings).repository)
 
     def test_failed_trade_is_persisted_without_network_on_trade_thread(self):
