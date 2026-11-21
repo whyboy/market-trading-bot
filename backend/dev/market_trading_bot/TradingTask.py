@@ -72,7 +72,7 @@ class TradingTask:
             try:
                 self._heartbeat()
             finally:
-                self.notifier.report(self)
+                self.notifier.send_trade_execution_report(self)
 
     def run_pap(self) -> dict:
         """已有当日账本则直接返回，否则获取行情、计算信号并原子调仓。"""

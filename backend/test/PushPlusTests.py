@@ -37,7 +37,7 @@ class PushPlusTests(unittest.TestCase):
         self.assertIn('+2.35%', content)
         self.assertIn('非收盘收益', content)
         with patch.object(notifier.client, 'send', return_value='receipt') as send:
-            notifier.report(self.task())
+            notifier.send_trade_execution_report(self.task())
         send.assert_called_once_with(title, content)
         self.assertFalse((self.root / 'data').exists())
 

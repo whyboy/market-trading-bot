@@ -11,7 +11,7 @@ class PushPlusNotifier:
         token = settings['pushplus']['token'].strip()
         self.client = PushPlusClient(token)
 
-    def report(self, task):
+    def send_trade_execution_report(self, task):
         try:
             title, content = TradeExecutionReport.build(task)
             self.client.send(title, content)
@@ -21,7 +21,7 @@ class PushPlusNotifier:
             self.logger.error('执行报告生成或发送失败 strategy=%s instance=%s；交易结果不受影响',
                               task.strategy_id, task.instance_id)
 
-    def daily_report(self, strategy_id, instance_id, summary):
+    def send_daily_account_report(self, strategy_id, instance_id, summary):
         """接收已计算的每日估值，生成并发送总结。"""
         try:
             title, content = DailyAccountReport.build(strategy_id, instance_id, summary)
