@@ -130,8 +130,7 @@ class TaskSchedulerTests(unittest.TestCase):
             task = self.scheduler.tasks[('etf_rotation', 'etf_rotation_pap')]
             task.thread.join(timeout=2)
         self.assertTrue(task.result['success'])
-        self.assertEqual(task.status_store.database,
-                         self.root / 'data/runtime/etf_rotation/etf_rotation_pap/runtime.sqlite3')
+        self.assertFalse((self.root / 'data/runtime/etf_rotation/etf_rotation_pap/runtime.sqlite3').exists())
 
     def test_task_only_executes_strategy_and_exits(self):
         task = self.scheduler._build_trade_task('etf_rotation', self.config['instances'][0], DUE)
@@ -188,7 +187,7 @@ class TaskSchedulerTests(unittest.TestCase):
         self.assertEqual(second.result['state'], 'success')
         self.assertIsNot(first.strategy, second.strategy)
         self.assertIsNot(first.executor, second.executor)
-        self.assertNotEqual(first.status_store.database, second.status_store.database)
+        self.assertIsNot(first.status, second.status)
 
     def test_start_after_nine_schedules_immediate_calendar_check(self):
         self.scheduler.stop()
