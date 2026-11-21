@@ -22,13 +22,13 @@ class PushPlusTests(unittest.TestCase):
 
     def task(self):
         return SimpleNamespace(
-            strategy_id='etf_rotation', instance_id='pap',
+            strategy_id='etf_rotation', instance_id='TradeExecutor',
             scheduled_at=datetime(2026, 11, 20, 14, 30, tzinfo=SHANGHAI),
             result={'success': True, 'finished_at': '2026-11-20T14:31:00+08:00'},
             output={'date': '2026-11-20', 'signal': {'as_of': '2026-11-20T14:30:00+08:00'},
                     'equity': '102350', 'cash': '12350',
                     'positions': {}, 'fills': [], 'csv_exported': True},
-            account_store=SimpleNamespace(directory=self.root / 'data/pap',
+            account_store=SimpleNamespace(directory=self.root / 'data/TradeExecutor',
                                                get_latest_account=lambda *args: {'initial_cash': '100000'}))
 
     def test_no_fills_still_sends_report_directly(self):
@@ -64,7 +64,7 @@ class PushPlusTests(unittest.TestCase):
     def test_notification_failure_does_not_change_successful_trade(self):
         notifier = PushPlusNotifier(self.settings)
         task = TradingTask(Mock(), Mock(), Mock(), Mock(), strategy_id='example',
-                           instance_id='pap', initial_cash=100000,
+                           instance_id='TradeExecutor', initial_cash=100000,
                            scheduled_at=datetime(2026, 11, 20, 14, 30, tzinfo=SHANGHAI), notifier=notifier)
         with patch.object(task, 'trade', return_value={'fills': []}) as trade:
             with patch.object(TradeExecutionReport, 'build', return_value=('title', 'content')):
@@ -79,7 +79,7 @@ class PushPlusTests(unittest.TestCase):
     def test_failed_trade_sends_failure_report(self):
         notifier = PushPlusNotifier(self.settings)
         task = TradingTask(Mock(), Mock(), Mock(), Mock(), strategy_id='example',
-                           instance_id='pap', initial_cash=100000,
+                           instance_id='TradeExecutor', initial_cash=100000,
                            scheduled_at=datetime(2026, 11, 20, 14, 30, tzinfo=SHANGHAI), notifier=notifier)
         with patch.object(task, 'trade', side_effect=ValueError('bad market data')):
             with patch.object(notifier.client, 'send', return_value='receipt') as send:

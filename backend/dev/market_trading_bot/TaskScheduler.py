@@ -13,7 +13,7 @@ from market_trading_bot.strategy.ETFRotationStrategyImpl import ETFRotationStrat
 from market_trading_bot.task.DailySummaryTask import DailySummaryTask
 from market_trading_bot.task.DailyValuationTask import DailyValuationTask
 from market_trading_bot.task.TradingTask import TradingTask
-from market_trading_bot.trader.PapTrader import PapTrader
+from market_trading_bot.trading.TradeExecutor import TradeExecutor
 from pathlib import Path
 
 
@@ -252,13 +252,13 @@ class TaskScheduler:
     def _build_trade_task(self, strategy_id, instance, scheduled_at):
         """为一个策略账户装配独立的交易依赖。"""
         config = self.configs[strategy_id]
-        if instance['mode'] != 'pap' or config['strategy'] != 'etf_rotation':
+        if instance['mode'] != 'TradeExecutor' or config['strategy'] != 'etf_rotation':
             raise ValueError('当前仅支持ETF轮动模拟账户')
         data_dir = self.root / self.settings['storage']['data_dir']
         return TradingTask(
             strategy=ETFRotationStrategyImpl(config['parameters']),
             market=AKShareMarket(self.settings['market']),
-            executor=PapTrader(instance['execution'], config['instruments']),
+            executor=TradeExecutor(instance['execution'], config['instruments']),
             account_store=AccountService(data_dir, instance['id'], strategy_id),
             strategy_id=strategy_id, instance_id=instance['id'], initial_cash=instance['initial_cash'],
             scheduled_at=scheduled_at, notifier=self.notifier,

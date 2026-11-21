@@ -6,7 +6,7 @@ class TradeExecutionReport:
     """消息示例（标题及正文）：
 
     etf_rotation｜模拟交易完成
-    账户：etf_rotation_pap
+    账户：etf_rotation_trade_executor
     计划时间：2026-11-20T14:30:00+08:00
     结束时间：2026-11-20T14:30:18+08:00
     估值时间：2026-11-20T14:30:10+08:00

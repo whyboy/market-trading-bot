@@ -2,7 +2,7 @@
 import math
 import unittest
 from decimal import Decimal
-from market_trading_bot.trader.PapTrader import PapTrader
+from market_trading_bot.trading.TradeExecutor import TradeExecutor
 from MarketFixture import MarketFixture
 
 
@@ -19,7 +19,7 @@ class ETFRotationStrategyImplTests(MarketFixture, unittest.TestCase):
         self.daily['收盘'] = [100 * math.exp(.001 * day + .005 * math.sin(day)) for day in range(len(self.days))]
         as_of, snapshots = self.load()
         rules = {symbol: {'lot_size': 100, 't_plus_one': True} for symbol in self.strategy.symbols}
-        trader = PapTrader({'commission_rate': .0002, 'minimum_commission': 5, 'slippage_rate': 0}, rules)
+        trader = TradeExecutor({'commission_rate': .0002, 'minimum_commission': 5, 'slippage_rate': 0}, rules)
         for target_volatility in (0, .15):
             with self.subTest(target_volatility=target_volatility):
                 self.strategy.target_volatility = target_volatility

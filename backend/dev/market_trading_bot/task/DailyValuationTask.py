@@ -46,7 +46,7 @@ class DailyValuationTask:
         day = self.context['day']
         for strategy_id, config in sorted(self.configs.items()):
             for instance in config.get('instances', []):
-                if not instance['enabled'] or instance['mode'] != 'pap':
+                if not instance['enabled'] or instance['mode'] != 'TradeExecutor':
                     continue
                 if self.stop_event.is_set() or self.now().date() != day:
                     return False
