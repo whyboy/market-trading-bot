@@ -8,7 +8,7 @@ from market_trading_bot.StrategyLogger import strategy_logging
 from pathlib import Path
 
 
-class TradeScheduler:
+class TradingScheduler:
     def __init__(self, root: Path):
         self.root = root
         self.settings = json.loads((root / 'config/global.json').read_text())

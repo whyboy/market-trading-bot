@@ -5,7 +5,7 @@ import threading
 import unittest
 from datetime import date, datetime, timedelta
 from market_trading_bot.AKShareMarket import SHANGHAI
-from market_trading_bot.runtime.TradeScheduler import TradeScheduler
+from market_trading_bot.runtime.TradingScheduler import TradingScheduler
 from market_trading_bot.runtime.TradingWorker import TradingWorker
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -24,10 +24,10 @@ class SchedulerTests(unittest.TestCase):
         self.config_path = self.root / 'config/etf_rotation_strategy.json'
         self.save_config()
         self.current = DUE - timedelta(seconds=10)
-        self.calendar_patch = patch('market_trading_bot.runtime.TradeScheduler.AKShareMarket.trading_calendar',
+        self.calendar_patch = patch('market_trading_bot.runtime.TradingScheduler.AKShareMarket.trading_calendar',
                                     return_value=[date(2026, 11, 20), date(2026, 11, 24)])
         self.calendar = self.calendar_patch.start()
-        self.scheduler = TradeScheduler(self.root)
+        self.scheduler = TradingScheduler(self.root)
         self.scheduler.now = lambda: self.current
         self.stop = threading.Event()
         self.execute = Mock(return_value={'success': True, 'finished_at': DUE.isoformat()})
@@ -121,7 +121,7 @@ class SchedulerTests(unittest.TestCase):
     def test_failed_account_does_not_prevent_other_account(self):
         self.config['instances'].append({**self.config['instances'][0], 'id': 'second'})
         self.save_config()
-        scheduler = TradeScheduler(self.root)
+        scheduler = TradingScheduler(self.root)
         scheduler.now = lambda: self.current
         scheduler.register_jobs(self.execute, self.stop)
         self.execute.side_effect = [ValueError('策略失败'), {'success': True}]
@@ -134,14 +134,14 @@ class SchedulerTests(unittest.TestCase):
     def test_disabled_accounts_are_not_registered(self):
         self.config['instances'][0]['enabled'] = False
         self.save_config()
-        scheduler = TradeScheduler(self.root)
+        scheduler = TradingScheduler(self.root)
         scheduler.register_jobs(self.execute, self.stop)
         self.assertFalse(scheduler.scheduler.queue)
 
     def test_worker_loads_calendar_and_trades_in_same_thread(self):
         entered = threading.Event()
         thread_ids = []
-        register_jobs = TradeScheduler.register_jobs
+        register_jobs = TradingScheduler.register_jobs
 
         def register(scheduler, execute, stop):
             register_jobs(scheduler, execute, stop)
@@ -151,8 +151,8 @@ class SchedulerTests(unittest.TestCase):
             thread_ids.append(threading.get_ident())
             entered.set()
 
-        with patch.object(TradeScheduler, 'now', side_effect=lambda: self.current), \
-                patch.object(TradeScheduler, 'register_jobs', register), \
+        with patch.object(TradingScheduler, 'now', side_effect=lambda: self.current), \
+                patch.object(TradingScheduler, 'register_jobs', register), \
                 patch('market_trading_bot.runner.run_pap', side_effect=execute):
             worker = TradingWorker(self.root)
             worker.start()
@@ -170,7 +170,7 @@ class SchedulerTests(unittest.TestCase):
             self.config['schedule']['trade_time'] = value
             self.save_config()
             with self.assertRaises(ValueError):
-                TradeScheduler(self.root)
+                TradingScheduler(self.root)
 
     def test_worker_skips_holiday_without_recording_execution(self):
         self.current = DUE.replace(day=23)

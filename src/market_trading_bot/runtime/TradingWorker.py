@@ -5,7 +5,7 @@ import os
 import threading
 import uuid
 from .RuntimeStore import RuntimeStore
-from .TradeScheduler import TradeScheduler
+from .TradingScheduler import TradingScheduler
 from datetime import datetime, timezone
 from pathlib import Path
 from queue import Empty, Queue
@@ -16,7 +16,7 @@ class TradingWorker:
 
     def __init__(self, root: Path):
         self.root = root
-        self.scheduler = TradeScheduler(root)
+        self.scheduler = TradingScheduler(root)
         self.store = RuntimeStore(root)
         self.tasks = Queue()
         self.ready = threading.Event()
