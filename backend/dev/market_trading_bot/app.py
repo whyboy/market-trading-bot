@@ -32,18 +32,15 @@ app = FastAPI(title='交易程序监控', docs_url=None, redoc_url=None, lifespa
 
 @app.get('/api/runtime')
 def runtime(strategy_id: str | None = None, instance_id: str | None = None):
-    """查询指定策略或账户的运行状态，未指定策略时使用第一个策略。
-
-    :raises HTTPException: 账户不属于所选策略时返回 404。
-    """
-    configurations = strategies()
-    if not configurations:
+    """查询策略或账户状态；未指定策略时使用第一个策略。"""
+    configs = load_strategies()
+    if not configs:
         return {'state': 'unknown', 'online': False}
-    configuration = strategy_by_id(strategy_id) if strategy_id else configurations[0]
-    strategy_id = configuration['strategy']
-    if not configuration.get('enable', True):
+    config = get_strategy(strategy_id, configs) if strategy_id else configs[0]
+    strategy_id = config['strategy']
+    if not config.get('enable', True):
         return {'strategy': strategy_id, 'state': 'disabled', 'online': False}
-    if instance_id and not any(item['id'] == instance_id for item in configuration.get('instances', [])):
+    if instance_id and not any(item['id'] == instance_id for item in config.get('instances', [])):
         raise HTTPException(404, '账户不属于所选策略')
     scheduler = getattr(app.state, 'scheduler', None) or TaskScheduler(ROOT)
     return scheduler.get_status(strategy_id, instance_id)
@@ -53,32 +50,28 @@ def runtime(strategy_id: str | None = None, instance_id: str | None = None):
 def list_strategies():
     return [{'id': item['strategy'], 'enable': item.get('enable', True), 'instances': [
         {'id': instance['id'], 'mode': instance['mode'], 'enabled': instance['enabled']}
-        for instance in item.get('instances', [])]} for item in strategies()]
+        for instance in item.get('instances', [])]} for item in load_strategies()]
 
 
 @app.get('/api/accounts/{instance_id}')
 def account(instance_id: str):
-    """只读查询账户最近交易快照，未开户时返回 initialized=False。
-
-    :param instance_id: 配置中的账户 ID。
-    :raises HTTPException: 账户 ID 无效或未配置时返回 404。
-    """
+    """只读查询账户最近交易资产；未开户返回 initialized=False。"""
     if not re.fullmatch(r'[A-Za-z0-9_-]+', instance_id):
         raise HTTPException(404, '账户不存在')
-    if not any(instance['id'] == instance_id for item in strategies() for instance in item.get('instances', [])):
+    if not any(instance['id'] == instance_id for item in load_strategies() for instance in item.get('instances', [])):
         raise HTTPException(404, '账户不存在')
-    return PapAccountRepository.get_latest_account(ROOT / settings()['storage']['data_dir'], instance_id)
+    return PapAccountRepository.get_latest_account(ROOT / load_settings()['storage']['data_dir'], instance_id)
 
 
 @app.get('/api/strategies/{strategy_id}/logs')
 def log_dates(strategy_id: str):
-    return sorted([path.stem for path in log_directory(strategy_id).glob('*.log')
+    return sorted([path.stem for path in log_dir(strategy_id).glob('*.log')
                    if re.fullmatch(r'\d{4}-\d{2}-\d{2}', path.stem)], reverse=True)
 
 
 @app.get('/api/strategies/{strategy_id}/logs/{day}')
 def log_content(strategy_id: str, day: date, offset: int = Query(0, ge=0)):
-    path = log_directory(strategy_id) / f'{day.isoformat()}.log'
+    path = log_dir(strategy_id) / f'{day.isoformat()}.log'
     if not path.is_file():
         raise HTTPException(404, '日志不存在')
     with path.open('rb') as stream:
@@ -104,23 +97,23 @@ def index():
     return FileResponse(DIST / 'index.html')
 
 
-def log_directory(strategy_id):
-    strategy_by_id(strategy_id)
+def log_dir(strategy_id):
+    get_strategy(strategy_id, load_strategies())
     if not re.fullmatch(r'[A-Za-z0-9_-]+', strategy_id):
         raise HTTPException(404, '策略不存在')
-    return ROOT / settings()['logging']['directory'] / strategy_id
+    return ROOT / load_settings()['logging']['directory'] / strategy_id
 
 
-def strategy_by_id(strategy_id):
-    for item in strategies():
+def get_strategy(strategy_id, configs):
+    for item in configs:
         if item['strategy'] == strategy_id:
             return item
     raise HTTPException(404, '策略不存在')
 
 
-def strategies():
+def load_strategies():
     return [json.loads(path.read_text()) for path in sorted((ROOT / 'market_trading_bot/config').glob('*_strategy.json'))]
 
 
-def settings():
+def load_settings():
     return json.loads((ROOT / 'market_trading_bot/config/global.json').read_text())

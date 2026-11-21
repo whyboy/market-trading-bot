@@ -1,5 +1,4 @@
 """纯内存模拟调仓；账户持久化由 PapAccountRepository 负责。"""
-import math
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP
 from market_trading_bot.data.StrategyResult import StrategyResult
 
@@ -9,10 +8,10 @@ class PapTrader:
 
     def __init__(self, settings: dict, instruments: dict):
         """读取费用与标的规则；费用非负，滑点须小于 1。"""
-        self.rate = Decimal(str(settings['commission_rate']))
-        self.minimum = Decimal(str(settings['minimum_commission']))
+        self.commission_rate = Decimal(str(settings['commission_rate']))
+        self.min_commission = Decimal(str(settings['minimum_commission']))
         self.slippage = Decimal(str(settings['slippage_rate']))
-        if any(not value.is_finite() or value < 0 for value in (self.rate, self.minimum, self.slippage)) or self.slippage >= 1:
+        if any(not value.is_finite() or value < 0 for value in (self.commission_rate, self.min_commission, self.slippage)) or self.slippage >= 1:
             raise ValueError('费用必须为非负有限数，滑点必须小于1')
         for rule in instruments.values():
             if type(rule['lot_size']) is not int or rule['lot_size'] <= 0 or type(rule['t_plus_one']) is not bool:
@@ -20,12 +19,7 @@ class PapTrader:
         self.instruments = instruments
 
     def rebalance(self, signal: StrategyResult, account: dict) -> dict:
-        """按调仓前净资产计算目标份额，返回新账户与订单、成交，不修改输入。
-
-        :param signal: 行情层已校验价格有效性的策略结果，须覆盖所有持仓标的。
-        :param account: 上次记账日期、现金及持仓；跨日后历史持仓全部可卖。
-        :return: 新账户、订单、成交及盘中估值；不修改传入账户。
-        """
+        """使用策略生成的目标权重，按调仓前净资产计算份额；先卖后买，返回成交及新账户。"""
         day = signal.as_of.date().isoformat()
         if account['date'] and day <= account['date']:
             raise ValueError('调仓日期必须晚于上次记账日期')
@@ -33,10 +27,8 @@ class PapTrader:
         positions = {symbol: dict(position) for symbol, position in account['positions'].items()}
         prices = {item.symbol: Decimal(str(item.price)) for item in signal.ranking}
         weights = signal.target_weights
-        if set(prices) != set(weights) or not set(positions) <= set(prices):
-            raise ValueError('行情和目标权重必须覆盖所有持仓标的')
-        if any(not math.isfinite(weight) or not 0 <= weight <= 1 for weight in weights.values()) or sum(weights.values()) > 1 + 1e-12:
-            raise ValueError('目标权重必须非负且合计不超过1')
+        if not positions.keys() <= prices.keys():
+            raise ValueError('行情必须覆盖所有持仓标的')
         for position in positions.values():
             position['sellable'] = position['quantity']
         equity = cash + sum(prices[symbol] * position['quantity'] for symbol, position in positions.items())
@@ -96,7 +88,7 @@ class PapTrader:
 
     def commission(self, amount: Decimal) -> Decimal:
         """取比例佣金与最低佣金的较大值，再按分四舍五入。"""
-        return self.money(max(amount * self.rate, self.minimum))
+        return self.money(max(amount * self.commission_rate, self.min_commission))
 
     @staticmethod
     def money(value: Decimal) -> Decimal:

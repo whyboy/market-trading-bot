@@ -52,7 +52,7 @@ class TaskSchedulerTests(unittest.TestCase):
         self.assertEqual(trigger.get_next_fire_time(None, self.current), morning)
         self.assertEqual(trigger.get_next_fire_time(morning, morning + timedelta(seconds=1)), morning + timedelta(days=1))
         self.assertEqual(self.scheduler.tasks, {})
-        self.assertEqual(self.scheduler.jobs, {})
+        self.assertIsNone(self.scheduler.timer.get_job('etf_rotation'))
         self.calendar.assert_not_called()
 
     def test_trading_day_registers_only_today_future_jobs(self):
@@ -60,7 +60,7 @@ class TaskSchedulerTests(unittest.TestCase):
         self.calendar.assert_called_once()
         self.assertTrue(self.scheduler.is_trading_day)
         self.assertEqual(self.scheduler.tasks, {})
-        self.assertEqual(self.scheduler.jobs['etf_rotation'].next_run_time, DUE)
+        self.assertEqual(self.scheduler.timer.get_job('etf_rotation').next_run_time, DUE)
         self.scheduler.prepare_day()
         self.calendar.assert_called_once()
 
@@ -68,9 +68,9 @@ class TaskSchedulerTests(unittest.TestCase):
         self.current = DUE.replace(day=23, hour=9)
         self.scheduler.prepare_day()
         self.assertFalse(self.scheduler.is_trading_day)
-        self.assertEqual(self.scheduler.jobs, {})
-        with patch('market_trading_bot.task.TradingTask.TradingTask.run_pap') as trade:
-            self.scheduler._start_task(self.path)
+        self.assertIsNone(self.scheduler.timer.get_job('etf_rotation'))
+        with patch('market_trading_bot.task.TradingTask.TradingTask.trade') as trade:
+            self.scheduler._start_trades('etf_rotation', self.current.date())
         trade.assert_not_called()
         self.assertEqual(self.scheduler.tasks, {})
 
@@ -80,7 +80,7 @@ class TaskSchedulerTests(unittest.TestCase):
             self.prepare()
         wait.assert_called_once_with(5)
         self.assertIsNone(self.scheduler.calendar_error)
-        self.assertIn('etf_rotation', self.scheduler.jobs)
+        self.assertIsNotNone(self.scheduler.timer.get_job('etf_rotation'))
 
     def test_late_calendar_recovery_does_not_run_past_strategy_time(self):
         self.calendar.side_effect = [ValueError('网络失败'), [date(2026, 11, 19), date(2026, 11, 20), date(2026, 11, 24)]]
@@ -92,7 +92,7 @@ class TaskSchedulerTests(unittest.TestCase):
         with patch.object(self.scheduler.stop_event, 'wait', side_effect=wait):
             self.prepare()
         self.assertTrue(self.scheduler.is_trading_day)
-        self.assertEqual(self.scheduler.jobs, {})
+        self.assertIsNone(self.scheduler.timer.get_job('etf_rotation'))
         self.assertEqual(self.scheduler.tasks, {})
 
     def test_calendar_retry_stops_at_close(self):
@@ -105,25 +105,38 @@ class TaskSchedulerTests(unittest.TestCase):
         with patch.object(self.scheduler.stop_event, 'wait', side_effect=wait):
             self.prepare()
         self.calendar.assert_called_once()
-        self.assertFalse(self.scheduler.jobs)
+        self.assertIsNone(self.scheduler.timer.get_job('etf_rotation'))
 
     def test_calendar_retry_can_be_stopped(self):
         self.calendar.side_effect = ValueError('网络失败')
         with patch.object(self.scheduler.stop_event, 'wait', return_value=True):
             self.prepare()
         self.calendar.assert_called_once()
-        self.assertFalse(self.scheduler.jobs)
+        self.assertIsNone(self.scheduler.timer.get_job('etf_rotation'))
 
     def test_previous_day_callback_does_not_create_task(self):
         self.prepare()
         self.current = DUE + timedelta(days=1)
-        self.scheduler._start_task(self.path, DUE.date())
+        self.scheduler._start_trades('etf_rotation', DUE.date())
         self.assertEqual(self.scheduler.tasks, {})
 
+    def test_trade_uses_loaded_config_until_restart(self):
+        self.prepare()
+        job = self.scheduler.timer.get_job('etf_rotation')
+        self.path.unlink()
+        (self.root / 'market_trading_bot/config/global.json').unlink()
+        with patch.object(TradingTask, 'trade', return_value={}):
+            job.func(*job.args)
+            task = self.scheduler.tasks[('etf_rotation', 'etf_rotation_pap')]
+            task.thread.join(timeout=2)
+        self.assertTrue(task.result['success'])
+        self.assertEqual(task.status_store.database,
+                         self.root / 'data/runtime/etf_rotation/etf_rotation_pap/runtime.sqlite3')
+
     def test_task_only_executes_strategy_and_exits(self):
-        task = self.scheduler._build_task('etf_rotation', self.config['instances'][0], DUE)
+        task = self.scheduler._build_trade_task('etf_rotation', self.config['instances'][0], DUE)
         thread_ids = []
-        with patch('market_trading_bot.task.TradingTask.TradingTask.run_pap', side_effect=lambda *args: thread_ids.append(threading.get_ident())):
+        with patch('market_trading_bot.task.TradingTask.TradingTask.trade', side_effect=lambda *args: thread_ids.append(threading.get_ident())):
             task.start()
             task.thread.join(timeout=2)
         self.assertFalse(task.thread.is_alive())
@@ -140,17 +153,17 @@ class TaskSchedulerTests(unittest.TestCase):
             entered.set()
             release.wait(3)
 
-        with patch('market_trading_bot.task.TradingTask.TradingTask.run_pap', side_effect=trade):
-            self.scheduler._start_task(self.path)
+        with patch('market_trading_bot.task.TradingTask.TradingTask.trade', side_effect=trade):
+            self.scheduler._start_trades('etf_rotation', self.current.date())
             try:
                 self.assertTrue(entered.wait(2))
                 first = self.scheduler.tasks[('etf_rotation', 'etf_rotation_pap')]
-                self.scheduler._start_task(self.path)
+                self.scheduler._start_trades('etf_rotation', self.current.date())
                 self.assertIs(self.scheduler.tasks[('etf_rotation', 'etf_rotation_pap')], first)
             finally:
                 release.set()
                 first.thread.join(timeout=2)
-            self.scheduler._start_task(self.path)
+            self.scheduler._start_trades('etf_rotation', self.current.date())
             second = self.scheduler.tasks[('etf_rotation', 'etf_rotation_pap')]
             second.thread.join(timeout=2)
             self.assertIsNot(first, second)
@@ -165,8 +178,8 @@ class TaskSchedulerTests(unittest.TestCase):
                 raise ValueError('策略失败')
             return {}
 
-        with patch.object(TradingTask, 'run_pap', autospec=True, side_effect=trade):
-            self.scheduler._start_task(self.path)
+        with patch.object(TradingTask, 'trade', autospec=True, side_effect=trade):
+            self.scheduler._start_trades('etf_rotation', self.current.date())
             for task in self.scheduler.tasks.values():
                 task.thread.join(timeout=2)
         first = self.scheduler.tasks[('etf_rotation', 'etf_rotation_pap')]
@@ -175,7 +188,7 @@ class TaskSchedulerTests(unittest.TestCase):
         self.assertEqual(second.result['state'], 'success')
         self.assertIsNot(first.strategy, second.strategy)
         self.assertIsNot(first.executor, second.executor)
-        self.assertNotEqual(first.status_repository.database, second.status_repository.database)
+        self.assertNotEqual(first.status_store.database, second.status_store.database)
 
     def test_start_after_nine_schedules_immediate_calendar_check(self):
         self.scheduler.stop()
@@ -201,7 +214,9 @@ class TaskSchedulerTests(unittest.TestCase):
             self.current = DUE.replace(hour=9)
             scheduler.prepare_day()
             self.calendar.assert_called_once()
-            self.assertEqual(set(scheduler.jobs), {'etf_rotation', 'second'})
+            self.assertIsNotNone(scheduler.timer.get_job('etf_rotation'))
+            self.assertIsNotNone(scheduler.timer.get_job('second'))
+            self.assertIsNone(scheduler.timer.get_job('disabled'))
             self.assertFalse(scheduler.tasks)
         finally:
             scheduler.stop()
@@ -221,8 +236,8 @@ class TaskSchedulerTests(unittest.TestCase):
             else:
                 finished.set()
 
-        with patch.object(TradingTask, 'run_pap', autospec=True, side_effect=trade):
-            self.scheduler._start_task(self.path)
+        with patch.object(TradingTask, 'trade', autospec=True, side_effect=trade):
+            self.scheduler._start_trades('etf_rotation', self.current.date())
             try:
                 self.assertTrue(entered.wait(2))
                 self.assertTrue(finished.wait(2))
@@ -244,7 +259,7 @@ class TaskSchedulerTests(unittest.TestCase):
 
     def test_factory_rejects_unsupported_execution_mode(self):
         with self.assertRaises(ValueError):
-            self.scheduler._build_task('etf_rotation', {**self.config['instances'][0], 'mode': 'pro'}, DUE)
+            self.scheduler._build_trade_task('etf_rotation', {**self.config['instances'][0], 'mode': 'pro'}, DUE)
 
     def test_valuation_and_summary_have_separate_daily_triggers(self):
         trigger = self.scheduler.timer.get_job('_daily_report').trigger
@@ -259,14 +274,14 @@ class TaskSchedulerTests(unittest.TestCase):
         self.current = DUE.replace(hour=15, minute=10)
         with patch('market_trading_bot.TaskScheduler.DailySummaryTask') as task_class:
             task_class.return_value.thread.is_alive.return_value = False
-            self.scheduler._start_daily_summary_task()
-            self.scheduler._start_daily_summary_task()
+            self.scheduler._start_summary()
+            self.scheduler._start_summary()
             task_class.assert_called_once()
             task_class.return_value.start.assert_called_once()
             self.assertEqual(task_class.call_args.args[4]['previous_trading_day'], date(2026, 11, 19))
             self.calendar.assert_called_once()
             self.current += timedelta(days=1)
-            self.scheduler._start_daily_summary_task()
+            self.scheduler._start_summary()
             self.assertEqual(task_class.call_count, 2)
             self.assertFalse(task_class.call_args.args[4]['is_trading_day'])
 
@@ -275,9 +290,9 @@ class TaskSchedulerTests(unittest.TestCase):
         events = []
         task = Mock()
         task.thread.join.side_effect = lambda: events.append('valuation-finished')
-        self.scheduler.daily_valuation_task = task
-        with patch.object(self.scheduler, '_start_daily_valuation_task', side_effect=lambda: events.append('valuation-start')):
-            with patch.object(self.scheduler, '_start_daily_summary_task', side_effect=lambda: events.append('summary-start')):
-                self.scheduler._recover_daily_tasks()
+        self.scheduler.valuation_task = task
+        with patch.object(self.scheduler, '_start_valuation', side_effect=lambda: events.append('valuation-start')):
+            with patch.object(self.scheduler, '_start_summary', side_effect=lambda: events.append('summary-start')):
+                self.scheduler._recover_daily()
         self.assertEqual(events, ['valuation-start', 'valuation-finished', 'summary-start'])
-        self.scheduler.daily_valuation_task = None
+        self.scheduler.valuation_task = None

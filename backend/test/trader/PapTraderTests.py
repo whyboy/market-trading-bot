@@ -14,7 +14,7 @@ class PapTraderTests(PapFixture, unittest.TestCase):
         self.assertEqual(result['orders'][0]['reason'], 'cash_limit')
 
     def test_proportional_commission_and_sell_slippage(self):
-        self.executor.rate = Decimal('.01')
+        self.executor.commission_rate = Decimal('.01')
         first = self.rebalance(self.signal(), self.executor, 10000)
         self.assertEqual(first['fills'][0]['commission'], '90.00')
         self.executor.slippage = Decimal('.01')

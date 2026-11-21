@@ -14,13 +14,7 @@ class PapAccountRepository:
     """按账户保存基础信息、每日交易与收盘估值，同日交易唯一约束防止重复成交。"""
 
     def __init__(self, directory: Path, instance_id: str, strategy_id: str = ''):
-        """打开账户独立数据库，创建 account、daily_results 表并迁移旧 runs 表。
-
-        :param directory: 所有账户的数据根目录。
-        :param instance_id: 账户 ID，也是数据库所在目录名。
-        :param strategy_id: 所属策略 ID；空字符串不校验归属。
-        :raises ValueError: 账户 ID 无效或账户已属于其他策略。
-        """
+        """打开账户账本并迁移旧 runs 表，校验账户归属。"""
         if not re.fullmatch(r'[A-Za-z0-9_-]+', instance_id):
             raise ValueError('实例ID只能包含字母、数字、下划线及连字符')
         self.instance_id = instance_id
@@ -56,11 +50,8 @@ class PapAccountRepository:
 
     @staticmethod
     def get_latest_account(directory: Path, instance_id: str) -> dict:
-        """只读查询最近交易快照，不创建目录或账户。
-
-        :return: 现金、持仓、执行时资产和开户资金；无记账记录返回 initialized=False。
-        """
-        snapshot = PapAccountRepository.get_account_snapshot_on_or_before(directory, instance_id, '9999-12-31')
+        """只读查询最近交易资产；未开户返回 initialized=False。"""
+        snapshot = PapAccountRepository.get_snapshot(directory, instance_id, '9999-12-31')
         if not snapshot['initialized']:
             return snapshot
         return {'initialized': True, 'date': snapshot['date'],
@@ -69,14 +60,8 @@ class PapAccountRepository:
                 'initial_cash': snapshot['initial_cash']}
 
     @staticmethod
-    def get_account_snapshot_on_or_before(directory: Path, instance_id: str, day: str) -> dict:
-        """只读查询指定日期及之前最近一次已提交的完整交易记录。
-
-        :param directory: 所有账户的数据根目录。
-        :param instance_id: 账户 ID。
-        :param day: 截止日期，格式 YYYY-MM-DD，包含当天。
-        :return: 含成交、持仓及实际开户资金的快照；无记录返回 initialized=False。
-        """
+    def get_snapshot(directory: Path, instance_id: str, day: str) -> dict:
+        """只读查询 day 当天及之前的最近交易快照；未开户返回 initialized=False。"""
         if not re.fullmatch(r'[A-Za-z0-9_-]+', instance_id):
             raise ValueError('实例ID只能包含字母、数字、下划线及连字符')
         database = (directory / instance_id / 'ledger.sqlite3').resolve()
@@ -89,42 +74,30 @@ class PapAccountRepository:
             if row is None:
                 return {'initialized': False}
             snapshot = json.loads(row[0])
-            initial = connection.execute('SELECT initial_cash FROM account WHERE id=1').fetchone()
-            if initial:
-                initial_cash = initial[0]
+            initial_row = connection.execute('SELECT initial_cash FROM account WHERE id=1').fetchone()
+            if initial_row:
+                initial_cash = initial_row[0]
             else:
                 first = json.loads(connection.execute(f'SELECT {column} FROM {table} WHERE {column} IS NOT NULL ORDER BY day LIMIT 1').fetchone()[0])
-                initial_cash = str(PapAccountRepository._infer_initial_cash_from_first_execution([first]))
+                initial_cash = str(PapAccountRepository._infer_initial_cash(first))
         return {**snapshot, 'initialized': True, 'initial_cash': initial_cash}
 
-    def find_execution_by_date(self, day: str) -> dict | None:
-        """查询指定日期已提交的交易结果，不把估值记录当作交易。
-
-        :param day: 交易日期，格式 YYYY-MM-DD。
-        :return: 交易结果字典；当天未记账返回 None。
-        """
+    def get_execution(self, day: str) -> dict | None:
+        """查询 day 当天的交易结果；未记账返回 None。"""
         with closing(sqlite3.connect(self.database)) as connection, connection:
             row = connection.execute('SELECT execution_payload FROM daily_results WHERE day = ?', (day,)).fetchone()
         return json.loads(row[0]) if row and row[0] is not None else None
 
     @contextmanager
-    def begin_rebalance_transaction(self, day: str, initial_cash: float):
-        """开启调仓事务，锁定最新账户并检查当天是否已记账。
-
-        :param day: 记账日期，格式 YYYY-MM-DD。
-        :param initial_cash: 首次开户资金，已有账户时忽略。
-        :yield: Transaction，包含 account、completed 和保存入口。
-        :raises RuntimeError: 当天未记账且调用方未保存结果。
-
-        正常退出提交；计算、保存或调用方抛出异常时全部回滚。
-        """
+    def transaction(self, day: str, initial_cash: float):
+        """锁定账户并去重；保存结果后提交，异常或未保存则回滚。"""
         with closing(sqlite3.connect(self.database, timeout=30)) as connection, connection:
             connection.execute('BEGIN IMMEDIATE')
             row = connection.execute('SELECT execution_payload FROM daily_results WHERE day = ?', (day,)).fetchone()
             completed = json.loads(row[0]) if row and row[0] is not None else None
             previous = connection.execute('SELECT execution_payload FROM daily_results WHERE execution_payload IS NOT NULL ORDER BY day DESC LIMIT 1').fetchone()
             account = json.loads(previous[0]) if previous else None
-            if completed is None and account is None:
+            if account is None:
                 cash = Decimal(str(initial_cash))
                 if not cash.is_finite():
                     raise ValueError('初始资金必须为有限数')
@@ -139,23 +112,18 @@ class PapAccountRepository:
                 raise RuntimeError('账户事务必须保存执行结果')
 
     class Transaction:
-        """仅供事务内使用的账户快照与保存入口，不依赖策略或执行器。"""
+        """当前事务的账户快照和保存入口。"""
 
         def __init__(self, connection, day, account, completed):
-            """保存事务内账户快照及当天已完成结果，不单独提交事务。"""
+            """保存事务快照。"""
             self.connection = connection
             self.day = day
             self.account = account
             self.completed = completed
             self.saved = False
 
-        def save_execution_result(self, result: dict) -> dict:
-            """在当前事务中保存交易结果，并清除当天旧估值、将状态置为 pending。
-
-            :param result: 交易结果，date 必须等于事务日期。
-            :return: 序列化后可写入账本的交易结果。
-            :raises ValueError: 日期不符或当天已有交易结果，禁止覆盖。
-            """
+        def save_execution(self, result: dict) -> dict:
+            """保存交易并使旧估值失效；禁止覆盖已记账结果。"""
             if self.completed is not None or result['date'] != self.day:
                 raise ValueError('不能覆盖已完成结果或保存其他日期的结果')
             payload = json.dumps(result, ensure_ascii=False, default=str, allow_nan=False)
@@ -168,81 +136,71 @@ class PapAccountRepository:
             self.saved = True
             return json.loads(payload)
 
-    def export_trade_summary_csv(self):
-        """重建账户交易汇总，每个有成交的日期一行；无成交只保留在 SQLite。
-
-        总资产采用调仓时估值；累计盈亏包含费用，收益率相对实际开户资金。
-        多笔成交或多只持仓按分号对齐列出，完整明细保留在 SQLite。
-        """
+    def export_trades(self):
+        """重建交易汇总 CSV，仅包含有成交的日期，资产采用执行时估值。"""
         with closing(sqlite3.connect(self.database, timeout=30)) as connection, connection:
             connection.execute('BEGIN IMMEDIATE')
-            runs = [json.loads(row[0]) for row in connection.execute('SELECT execution_payload FROM daily_results WHERE execution_payload IS NOT NULL ORDER BY day')]
-            initial_cash = self._get_or_restore_initial_cash(connection, runs)
+            executions = [json.loads(row[0]) for row in connection.execute('SELECT execution_payload FROM daily_results WHERE execution_payload IS NOT NULL ORDER BY day')]
+            initial_cash = self._load_initial_cash(connection, executions)
             fields = ['date', 'buy_etf', 'buy_quantity', 'buy_price',
                       'sell_etf', 'sell_quantity', 'sell_price', 'commission',
                       'holding_etf', 'holding_quantity', 'holding_price', 'market_value',
                       'cash', 'total_assets', 'initial_cash', 'cumulative_pnl',
                       'cumulative_return_pct', 'net_value']
-            temporary = self.directory / 'account_trades.csv.tmp'
-            with temporary.open('w', encoding='utf-8-sig', newline='') as stream:
+            temp_path = self.directory / 'account_trades.csv.tmp'
+            with temp_path.open('w', encoding='utf-8-sig', newline='') as stream:
                 writer = csv.DictWriter(stream, fieldnames=fields)
                 writer.writeheader()
-                for run in runs:
-                    if not run['fills']:
+                for execution in executions:
+                    if not execution['fills']:
                         continue
-                    equity, cash = Decimal(run['equity']), Decimal(run['cash'])
-                    row = {'date': run['date'], 'cash': str(cash), 'total_assets': str(equity),
+                    equity, cash = Decimal(execution['equity']), Decimal(execution['cash'])
+                    row = {'date': execution['date'], 'cash': str(cash), 'total_assets': str(equity),
                            'initial_cash': str(initial_cash), 'market_value': str(equity - cash),
-                           'commission': str(sum((Decimal(fill['commission']) for fill in run['fills']), Decimal('0.00'))),
+                           'commission': str(sum((Decimal(fill['commission']) for fill in execution['fills']), Decimal('0.00'))),
                            'cumulative_pnl': str(equity - initial_cash),
                            'cumulative_return_pct': format((equity / initial_cash - 1) * 100, '.6f'),
                            'net_value': format(equity / initial_cash, '.8f')}
                     for side in ('buy', 'sell'):
-                        fills = [fill for fill in run['fills'] if fill['side'] == side]
+                        fills = [fill for fill in execution['fills'] if fill['side'] == side]
                         for column, key in (('etf', 'symbol'), ('quantity', 'quantity'), ('price', 'price')):
                             row[f'{side}_{column}'] = ';'.join(str(fill[key]) for fill in fills)
-                    holdings = sorted(run['positions'])
-                    prices = {item['symbol']: item['price'] for item in run['signal']['ranking']}
+                    holdings = sorted(execution['positions'])
+                    prices = {item['symbol']: item['price'] for item in execution['signal']['ranking']}
                     row['holding_etf'] = ';'.join(holdings)
-                    row['holding_quantity'] = ';'.join(str(run['positions'][symbol]['quantity']) for symbol in holdings)
+                    row['holding_quantity'] = ';'.join(str(execution['positions'][symbol]['quantity']) for symbol in holdings)
                     row['holding_price'] = ';'.join(str(prices[symbol]) for symbol in holdings)
                     writer.writerow(row)
                 stream.flush()
                 os.fsync(stream.fileno())
-            temporary.replace(self.directory / 'account_trades.csv')
-            # 新汇总成功后清理旧版自动导出的明细文件，SQLite 明细始终保留。
+            temp_path.replace(self.directory / 'account_trades.csv')
+            # 汇总替换成功后再清理旧版 CSV。
             for name in ('runs', 'equity', 'orders', 'fills', 'positions', 'signals'):
                 (self.directory / f'{name}.csv').unlink(missing_ok=True)
 
-    def _get_or_restore_initial_cash(self, connection: sqlite3.Connection, runs: list[dict]) -> Decimal:
-        """读取开户资金；旧账本仅首次读取时从首笔记账反推并补存。"""
+    def _load_initial_cash(self, connection: sqlite3.Connection, executions: list[dict]) -> Decimal:
+        """读取开户资金；旧账本缺失时反推并补存。"""
         row = connection.execute('SELECT initial_cash FROM account WHERE id = 1').fetchone()
         if row:
             return Decimal(row[0])
-        initial_cash = self._infer_initial_cash_from_first_execution(runs)
-        if runs:
-            self._insert_account(connection, initial_cash)
+        if not executions:
+            return Decimal('0')
+        initial_cash = self._infer_initial_cash(executions[0])
+        self._insert_account(connection, initial_cash)
         return initial_cash
 
     @staticmethod
-    def _infer_initial_cash_from_first_execution(runs: list[dict]) -> Decimal:
-        """从旧账本首笔记账的现金流还原开户资金。"""
-        initial_cash = Decimal(runs[0]['cash']) if runs else Decimal('0')
-        if runs:
-            for fill in runs[0]['fills']:
-                amount, fee = Decimal(fill['amount']), Decimal(fill['commission'])
-                initial_cash += amount + fee if fill['side'] == 'buy' else fee - amount
+    def _infer_initial_cash(execution: dict) -> Decimal:
+        """从首次交易现金流还原开户资金。"""
+        initial_cash = Decimal(execution['cash'])
+        for fill in execution['fills']:
+            amount, fee = Decimal(fill['amount']), Decimal(fill['commission'])
+            initial_cash += amount + fee if fill['side'] == 'buy' else fee - amount
         return initial_cash
 
     @staticmethod
-    def find_latest_valuation_on_or_before(directory, instance_id, day):
-        """只读查询截止日期之前最近一次成功估值，包含截止当天。
-
-        :param directory: 所有账户的数据根目录。
-        :param instance_id: 账户 ID。
-        :param day: 截止日期，格式 YYYY-MM-DD。
-        :return: 成功估值字典；无记录返回 None。
-        """
+    def get_valuation(directory, instance_id, day):
+        """只读查询 day 当天及之前的最近成功估值；无记录返回 None。"""
         if not re.fullmatch(r'[A-Za-z0-9_-]+', instance_id):
             raise ValueError('实例ID只能包含字母、数字、下划线及连字符')
         database = directory / instance_id / 'ledger.sqlite3'
@@ -256,12 +214,8 @@ class PapAccountRepository:
                 ORDER BY day DESC LIMIT 1""", (day,)).fetchone()
         return json.loads(row[0]) if row else None
 
-    def save_daily_valuation(self, snapshot):
-        """保存收盘估值并标记 success，保留当天交易结果。
-
-        :param snapshot: 估值字典，date 为 YYYY-MM-DD。
-        :return: 传入的估值字典。
-        """
+    def save_valuation(self, snapshot):
+        """保存收盘估值并标记 success，保留交易结果。"""
         payload = json.dumps(snapshot, ensure_ascii=False, allow_nan=False)
         with closing(sqlite3.connect(self.database, timeout=30)) as connection, connection:
             connection.execute("""INSERT INTO daily_results(day, valuation_payload, valuation_status, updated_at)
@@ -271,13 +225,8 @@ class PapAccountRepository:
                                (snapshot['date'], payload, datetime.now(timezone.utc).isoformat()))
         return snapshot
 
-    def mark_valuation_status(self, day, status, error=''):
-        """更新估值状态和错误提示，保留交易及已有估值数据。
-
-        :param day: 估值日期，格式 YYYY-MM-DD。
-        :param status: pending、running 或 failed；成功由 save_daily_valuation 设置。
-        :param error: 失败提示，默认清空。
-        """
+    def set_valuation_status(self, day, status, error=''):
+        """更新估值状态和错误，保留交易及估值数据。"""
         with closing(sqlite3.connect(self.database, timeout=30)) as connection, connection:
             connection.execute("""INSERT INTO daily_results(day, valuation_status, valuation_error, updated_at)
                 VALUES (?, ?, ?, ?) ON CONFLICT(day) DO UPDATE SET valuation_status=excluded.valuation_status,
@@ -286,13 +235,7 @@ class PapAccountRepository:
 
     @staticmethod
     def get_daily_result(directory, instance_id, day):
-        """只读查询指定日期的交易、估值及执行状态。
-
-        :param directory: 所有账户的数据根目录。
-        :param instance_id: 账户 ID。
-        :param day: 查询日期，格式 YYYY-MM-DD。
-        :return: 含 execution、valuation、valuation_status、valuation_error 的字典；无记录返回 None。
-        """
+        """只读查询 day 当天的交易、估值和状态；无记录返回 None。"""
         if not re.fullmatch(r'[A-Za-z0-9_-]+', instance_id):
             raise ValueError('实例ID只能包含字母、数字、下划线及连字符')
         database = directory / instance_id / 'ledger.sqlite3'
@@ -310,16 +253,13 @@ class PapAccountRepository:
                 'valuation_status': row['valuation_status'], 'valuation_error': row['valuation_error']}
 
     def _insert_account(self, connection, initial_cash):
-        """在当前事务中写入开户资金、策略归属及 UTC 创建时间。"""
+        """写入开户资金、账户归属和 UTC 开户时间。"""
         connection.execute("""INSERT INTO account(id, initial_cash, instance_id, strategy_id, created_at)
             VALUES (1, ?, ?, ?, ?)""", (str(initial_cash), self.instance_id, self.strategy_id,
                                                 datetime.now(timezone.utc).isoformat()))
 
     @staticmethod
     def _execution_source(connection):
-        """选择新旧账本的交易表和字段，兼容尚未迁移的数据库。
-
-        :return: (表名, 交易结果字段名)。
-        """
+        """返回新旧账本的交易表名和结果字段。"""
         migrated = connection.execute("SELECT 1 FROM sqlite_master WHERE name='daily_results'").fetchone()
         return ('daily_results', 'execution_payload') if migrated else ('runs', 'payload')

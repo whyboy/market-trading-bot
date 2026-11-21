@@ -32,7 +32,7 @@ class AppTests(unittest.TestCase):
         def build(scheduler, strategy_id, instance, scheduled_at):
             return TradingTask(Mock(), Mock(), Mock(), Mock(), Mock(), strategy_id=strategy_id,
                                instance_id=instance['id'], initial_cash=100000, scheduled_at=scheduled_at, notifier=Mock())
-        self.build_patch = patch.object(TaskScheduler, '_build_task', build)
+        self.build_patch = patch.object(TaskScheduler, '_build_trade_task', build)
         self.build_patch.start()
 
     def tearDown(self):
@@ -96,7 +96,7 @@ class AppTests(unittest.TestCase):
         config['enable'] = False
         path.write_text(json.dumps(config))
         with TestClient(app_module.app) as client:
-            self.assertEqual(app_module.app.state.scheduler.jobs, {})
+            self.assertIsNone(app_module.app.state.scheduler.timer.get_job('example'))
             self.assertEqual(client.get('/api/runtime?strategy_id=example').json()['state'], 'disabled')
 
     def test_duplicate_service_is_rejected_and_lock_released_after_shutdown(self):
@@ -119,12 +119,12 @@ class AppTests(unittest.TestCase):
             entered.set()
             release.wait(3)
 
-        with patch('market_trading_bot.task.TradingTask.TradingTask.run_pap', autospec=True, side_effect=trade):
+        with patch('market_trading_bot.task.TradingTask.TradingTask.trade', autospec=True, side_effect=trade):
             with TestClient(app_module.app) as client:
                 scheduler = app_module.app.state.scheduler
                 scheduler.calendar_day = scheduler.now().date()
                 scheduler.is_trading_day = True
-                scheduler._start_task(path)
+                scheduler._start_trades('example', scheduler.now().date())
                 try:
                     self.assertTrue(entered.wait(2))
                     result = client.get('/api/runtime?strategy_id=example').json()
@@ -166,15 +166,15 @@ class AppTests(unittest.TestCase):
             else:
                 finished.set()
 
-        with patch('market_trading_bot.task.TradingTask.TradingTask.run_pap', autospec=True, side_effect=trade):
+        with patch('market_trading_bot.task.TradingTask.TradingTask.trade', autospec=True, side_effect=trade):
             with TestClient(app_module.app):
                 scheduler = app_module.app.state.scheduler
                 scheduler.calendar_day = scheduler.now().date()
                 scheduler.is_trading_day = True
-                scheduler._start_task(first)
+                scheduler._start_trades('example', scheduler.now().date())
                 try:
                     self.assertTrue(entered.wait(2))
-                    scheduler._start_task(second)
+                    scheduler._start_trades('second', scheduler.now().date())
                     self.assertTrue(finished.wait(2))
                     self.assertNotEqual(scheduler.tasks[('example', 'example_pap')].thread.ident, scheduler.tasks[('second', 'second_pap')].thread.ident)
                 finally:

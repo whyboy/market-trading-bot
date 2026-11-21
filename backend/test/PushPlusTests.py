@@ -28,7 +28,7 @@ class PushPlusTests(unittest.TestCase):
             output={'date': '2026-11-20', 'signal': {'as_of': '2026-11-20T14:30:00+08:00'},
                     'equity': '102350', 'cash': '12350',
                     'positions': {}, 'fills': [], 'csv_exported': True},
-            account_repository=SimpleNamespace(directory=self.root / 'data/pap',
+            account_store=SimpleNamespace(directory=self.root / 'data/pap',
                                                get_latest_account=lambda *args: {'initial_cash': '100000'}))
 
     def test_no_fills_still_sends_report_directly(self):
@@ -38,7 +38,7 @@ class PushPlusTests(unittest.TestCase):
         self.assertIn('+2.35%', content)
         self.assertIn('非收盘收益', content)
         with patch.object(notifier.client, 'send', return_value='receipt') as send:
-            notifier.send_trade_execution_report(self.task())
+            notifier.send_trade_report(self.task())
         send.assert_called_once_with(title, content)
         self.assertFalse((self.root / 'data').exists())
 
@@ -66,7 +66,7 @@ class PushPlusTests(unittest.TestCase):
         task = TradingTask(Mock(), Mock(), Mock(), Mock(), Mock(), strategy_id='example',
                            instance_id='pap', initial_cash=100000,
                            scheduled_at=datetime(2026, 11, 20, 14, 30, tzinfo=SHANGHAI), notifier=notifier)
-        with patch.object(task, 'run_pap', return_value={'fills': []}) as trade:
+        with patch.object(task, 'trade', return_value={'fills': []}) as trade:
             with patch.object(TradeExecutionReport, 'build', return_value=('title', 'content')):
                 with patch.object(notifier.client, 'send', side_effect=PushPlusClient.Error('network')) as send:
                     task.start()
@@ -81,7 +81,7 @@ class PushPlusTests(unittest.TestCase):
         task = TradingTask(Mock(), Mock(), Mock(), Mock(), Mock(), strategy_id='example',
                            instance_id='pap', initial_cash=100000,
                            scheduled_at=datetime(2026, 11, 20, 14, 30, tzinfo=SHANGHAI), notifier=notifier)
-        with patch.object(task, 'run_pap', side_effect=ValueError('bad market data')):
+        with patch.object(task, 'trade', side_effect=ValueError('bad market data')):
             with patch.object(notifier.client, 'send', return_value='receipt') as send:
                 task.start()
                 task.thread.join(timeout=3)

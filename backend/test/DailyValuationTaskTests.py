@@ -36,8 +36,8 @@ class DailyValuationTaskTests(unittest.TestCase):
 
     def save_account(self, day, cash='79995', quantity=200):
         repository = self.store()
-        with repository.begin_rebalance_transaction(day.isoformat(), 100000) as transaction:
-            transaction.save_execution_result({'date': day.isoformat(), 'cash': cash, 'equity': '100000',
+        with repository.transaction(day.isoformat(), 100000) as transaction:
+            transaction.save_execution({'date': day.isoformat(), 'cash': cash, 'equity': '100000',
                 'positions': {'510300.XSHG': {'quantity': quantity}} if quantity else {},
                 'fills': [{'side': 'buy', 'amount': '20000', 'commission': '5'}],
                 'signal': {'as_of': f'{day}T14:30:00+08:00'}})
@@ -52,7 +52,7 @@ class DailyValuationTaskTests(unittest.TestCase):
 
     def test_first_day_uses_actual_initial_cash_and_preserves_execution(self):
         repository = self.save_account(self.day)
-        execution = repository.find_execution_by_date(self.day.isoformat())
+        execution = repository.get_execution(self.day.isoformat())
         self.assertTrue(self.run_task())
         result = self.result()
         self.assertEqual(result['valuation_status'], 'success')
@@ -105,7 +105,7 @@ class DailyValuationTaskTests(unittest.TestCase):
         self.assertEqual(result['valuation']['equity'], '100500.00')
         self.assertEqual(result['valuation']['buy_count'], 0)
         self.assertIn('未完成记账', result['valuation']['execution_note'])
-        self.assertIsNone(self.store().find_execution_by_date('2026-11-20'))
+        self.assertIsNone(self.store().get_execution('2026-11-20'))
 
     def test_holiday_reuses_existing_close_without_creating_holiday_row(self):
         self.save_account(self.day)
@@ -163,7 +163,7 @@ class DailyValuationTaskTests(unittest.TestCase):
                 summary = DailySummaryTask(self.root, self.settings, self.configs, notifier,
                                            self.context, self.stop, lambda: self.current.replace(minute=10))
                 summary.run()
-                result = notifier.send_daily_summary_report.call_args.args[1][0]['summary']
+                result = notifier.send_daily_report.call_args.args[1][0]['summary']
                 self.assertIn('仍在执行', result['notice'])
                 self.assertNotIn('equity', result)
             finally:
