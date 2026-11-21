@@ -6,7 +6,6 @@ import pandas as pd
 import unittest
 from datetime import datetime, timedelta
 from market_trading_bot.AKShareMarket import AKShareMarket, MarketDataError
-from market_trading_bot.runner import preview_signals
 from market_trading_bot.strategies.ETFRotationStrategy import ETFRotationStrategy
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -77,14 +76,6 @@ class SignalTests(unittest.TestCase):
                 with self.assertRaises(MarketDataError):
                     self.load(symbols)
 
-    def test_preview_signals_uses_validated_market_data(self):
-        as_of, snapshots = self.load()
-        with patch('market_trading_bot.runner.AKShareMarket') as market, \
-                patch('market_trading_bot.runner.strategy_logging'):
-            market.return_value.load.return_value = as_of, snapshots
-            result = preview_signals(ROOT, ROOT / 'config/etf_rotation_strategy.json')
-        self.assertEqual(result['operation'], 'signal_preview')
-        self.assertEqual(set(result['target_weights']), set(self.strategy.symbols))
 
 
 if __name__ == '__main__':

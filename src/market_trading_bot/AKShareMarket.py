@@ -81,6 +81,10 @@ class AKShareMarket:
         if not (time(9, 30) <= as_of.time() <= time(11, 30) or time(13) <= as_of.time() <= time(15)):
             raise MarketDataError('当前不在A股连续交易时段，策略执行时间为14:30')
 
+    def trading_calendar(self):
+        """获取完整交易日历，沿用行情请求超时和间隔配置。"""
+        return sorted(set(self._request(ak.calendar_trade_date_hist_sina)['trade_date']))
+
     def load(self, symbols: tuple[str, ...], history_points: int) -> tuple[datetime, dict[str, MarketSnapshot]]:
         """加载连续历史交易日收盘价，再批量获取当日盘中报价。
 
@@ -100,7 +104,7 @@ class AKShareMarket:
                     raise MarketDataError(f'不支持的证券代码: {symbol}')
                 market_id = '1' if match.group(2) == 'XSHG' else '0'
                 secids[f'{market_id}.{match.group(1)}'] = symbol
-            calendar = sorted(set(self._request(ak.calendar_trade_date_hist_sina)['trade_date']))
+            calendar = self.trading_calendar()
             if not calendar or not calendar[0] <= started.date() <= calendar[-1]:
                 raise MarketDataError('交易日历未覆盖当前日期')
             if started.date() not in calendar:

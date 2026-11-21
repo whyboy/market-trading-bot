@@ -1,10 +1,11 @@
-"""由 Web 服务管理的后台交易线程，暂不包含定时调度。"""
+"""由 Web 服务管理的后台交易线程，按交易日定时调仓。"""
 import fcntl
 import json
 import os
 import threading
 import uuid
 from .RuntimeStore import RuntimeStore
+from .TradeScheduler import TradeScheduler
 from datetime import datetime, timezone
 from pathlib import Path
 from queue import Empty, Queue
@@ -15,6 +16,7 @@ class TradingWorker:
 
     def __init__(self, root: Path):
         self.root = root
+        self.scheduler = TradeScheduler(root)
         self.store = RuntimeStore(root)
         self.tasks = Queue()
         self.ready = threading.Event()
@@ -79,12 +81,16 @@ class TradingWorker:
         execution['finished_at'] = datetime.now(timezone.utc).isoformat()
         self.status.update(state='idle', current_execution=None, last_execution=execution)
         self._heartbeat()
+        return execution
 
     def _run(self):
         try:
             self._heartbeat()
             self.ready.set()
             while not self.stop_event.is_set():
+                self.scheduler.tick(self._execute_trade, self.stop_event)
+                self.status.update(self.scheduler.snapshot())
+                self._heartbeat()
                 try:
                     task = self.tasks.get(timeout=5)
                 except Empty:

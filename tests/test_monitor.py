@@ -23,7 +23,7 @@ class MonitorTests(unittest.TestCase):
         (self.root / 'config/global.json').write_text(json.dumps({
             'storage': {'data_dir': 'data'}, 'logging': {'directory': 'logs'}}))
         (self.root / 'config/example_strategy.json').write_text(json.dumps({
-            'strategy': 'example', 'instances': [{'id': 'example_pap', 'mode': 'pap', 'enabled': True}]}))
+            'strategy': 'example', 'instances': [{'id': 'example_pap', 'mode': 'pap', 'enabled': False}]}))
         self.patch = patch.object(web, 'ROOT', self.root)
         self.patch.start()
         self.client = TestClient(web.app)
