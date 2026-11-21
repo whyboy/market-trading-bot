@@ -1,8 +1,8 @@
 """模拟账户核心测试使用的共同数据。"""
 from datetime import datetime, timedelta
 from market_trading_bot.data.StrategyResult import RankedETF, StrategyResult
-from market_trading_bot.execution.PapExecutor import PapExecutor
 from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
+from market_trading_bot.trader.PapTrader import PapTrader
 from market_trading_bot.TradingTask import TradingTask
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -17,7 +17,7 @@ class PapFixture:
         self.root = Path(self.temporary.name)
         self.rules = {'A': {'lot_size': 100, 't_plus_one': True},
                       'B': {'lot_size': 100, 't_plus_one': False}}
-        self.executor = PapExecutor({'commission_rate': .0002, 'minimum_commission': 5,
+        self.executor = PapTrader({'commission_rate': .0002, 'minimum_commission': 5,
                                        'slippage_rate': 0}, self.rules)
         self.account_store = PapAccountRepository(self.root, 'pap')
 

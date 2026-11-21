@@ -36,14 +36,14 @@ market-trading-bot/
 │   │       │   └── PapAccountRepository.py
 │   │       ├── log/StrategyLogger.py      # 日志处理代码
 │   │       ├── market/AKShareMarket.py
-│   │       ├── execution/PapExecutor.py
+│   │       ├── trader/PapTrader.py
 │   │       └── app.py
 │   └── test/                              # 核心测试，不与源码包同名
 │       ├── TradingSchedulerTests.py
 │       ├── strategy/ETFRotationStrategyImplTests.py
 │       ├── market/AKShareMarketTests.py
 │       ├── repository/PapAccountRepositoryTests.py
-│       ├── execution/PapExecutorTests.py
+│       ├── trader/PapTraderTests.py
 │       └── AppTests.py
 ├── AGENTS.md
 └── README.md
@@ -145,7 +145,7 @@ backend/.venv/bin/python backend/main.py
 ```text
 TradingScheduler → TradingTask（绑定策略＋账户）
                     ├── Market → Strategy → StrategyResult
-                    ├── PapExecutor：纯内存模拟调仓
+                    ├── PapTrader：纯内存模拟调仓
                     ├── PapAccountRepository：账户事务与CSV导出
                     └── TaskStatusRepository：该账户任务状态
 ```

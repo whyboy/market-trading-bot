@@ -5,12 +5,12 @@ import logging
 import threading
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime, time, timezone
-from market_trading_bot.execution.PapExecutor import PapExecutor
 from market_trading_bot.log.StrategyLogger import strategy_logging
 from market_trading_bot.market.AKShareMarket import AKShareMarket, SHANGHAI
 from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
 from market_trading_bot.repository.TaskStatusRepository import TaskStatusRepository
 from market_trading_bot.strategy.ETFRotationStrategyImpl import ETFRotationStrategyImpl
+from market_trading_bot.trader.PapTrader import PapTrader
 from market_trading_bot.TradingTask import TradingTask
 from pathlib import Path
 
@@ -135,7 +135,7 @@ class TradingScheduler:
         return TradingTask(
             strategy=ETFRotationStrategyImpl(config['parameters']),
             market=AKShareMarket(self.settings['market']),
-            executor=PapExecutor(instance['execution'], config['instruments']),
+            executor=PapTrader(instance['execution'], config['instruments']),
             account_repository=PapAccountRepository(self.root / self.settings['storage']['data_dir'], instance['id']),
             status_repository=TaskStatusRepository(self.root, strategy_id, instance['id']),
             strategy_id=strategy_id, instance_id=instance['id'], initial_cash=instance['initial_cash'],

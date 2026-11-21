@@ -4,7 +4,7 @@ from decimal import Decimal
 from PapFixture import PapFixture
 
 
-class PapExecutorTests(PapFixture, unittest.TestCase):
+class PapTraderTests(PapFixture, unittest.TestCase):
     def test_commission_lot_size_and_conservation(self):
         result = self.rebalance(self.signal(), self.executor, 10000)
         self.assertEqual(result['positions']['A'], {'quantity': 900, 'sellable': 0})
