@@ -7,6 +7,7 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from market_trading_bot.runtime.RuntimeStore import RuntimeStore
+from market_trading_bot.runtime.TradingWorker import TradingWorker
 from market_trading_bot.web import app as web
 from pathlib import Path
 from unittest.mock import patch
@@ -78,3 +79,28 @@ class MonitorTests(unittest.TestCase):
         self.assertTrue(result['initialized'])
         self.assertEqual(result['initial_cash'], '100000')
         self.assertEqual(result['equity'], '101000')
+
+    def test_web_manages_worker_lifecycle(self):
+        with TestClient(web.app) as client:
+            worker = web.app.state.worker
+            self.assertTrue(worker.thread.is_alive())
+            self.assertTrue(client.get('/api/runtime').json()['online'])
+            self.assertFalse((self.root / 'data/example_pap').exists())
+            duplicate = TradingWorker(self.root)
+            with self.assertRaisesRegex(RuntimeError, '只启动一个后端实例'):
+                duplicate.start()
+        self.assertFalse(worker.thread.is_alive())
+        self.assertEqual(RuntimeStore(self.root).read()['state'], 'stopped')
+        # 退出后释放文件锁，支持再次启动。
+        with TestClient(web.app) as client:
+            self.assertTrue(client.get('/api/runtime').json()['online'])
+
+    def test_dead_worker_is_offline_even_with_fresh_heartbeat(self):
+        with TestClient(web.app) as client:
+            worker = web.app.state.worker
+            worker.stop_event.set()
+            worker.thread.join(timeout=2)
+            now = datetime.now(timezone.utc).isoformat()
+            worker.store.write({**worker.status, 'state': 'idle', 'heartbeat_at': now})
+            self.assertFalse(client.get('/api/runtime').json()['online'])
+            self.assertEqual(client.get('/api/strategies').status_code, 200)

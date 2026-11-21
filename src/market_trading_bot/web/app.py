@@ -2,16 +2,31 @@
 import json
 import re
 import sqlite3
-from contextlib import closing
+from contextlib import asynccontextmanager, closing
 from datetime import date, datetime, timezone
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from market_trading_bot.runtime.RuntimeStore import RuntimeStore
+from market_trading_bot.runtime.TradingWorker import TradingWorker
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-app = FastAPI(title='交易程序监控', docs_url=None, redoc_url=None)
+
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    worker = TradingWorker(ROOT)
+    worker.start()
+    application.state.worker = worker
+    try:
+        yield
+    finally:
+        worker.stop()
+        application.state.worker = None
+
+
+app = FastAPI(title='交易程序监控', docs_url=None, redoc_url=None, lifespan=lifespan)
 
 
 def settings():
@@ -36,7 +51,10 @@ def runtime():
         return {'state': 'unknown', 'online': False}
     now = datetime.now(timezone.utc)
     age = max(0, (now - datetime.fromisoformat(status['heartbeat_at'])).total_seconds())
+    worker = getattr(app.state, 'worker', None)
     online = age <= 20 and status['state'] != 'stopped'
+    if worker is not None:
+        online = online and worker.thread.is_alive()
     return {**status, 'online': online, 'heartbeat_age_seconds': age,
             'uptime_seconds': max(0, (now - datetime.fromisoformat(status['started_at'])).total_seconds()) if online else None}
 

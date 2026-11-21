@@ -142,23 +142,20 @@ Vue 3 前端 + FastAPI 后端，支持运行状态、策略与账户概览、按
 npm ci --prefix frontend
 ```
 
-分别在三个终端启动：
+开发时分别在两个终端启动：
 
 ```bash
-# 后端：8001
+# 后端：8001，自动启动后台交易线程
 .venv/bin/python -m uvicorn market_trading_bot.web.app:app --app-dir src --host 127.0.0.1 --port 8001
 
 # 前端：8000，浏览器打开 http://127.0.0.1:8000
 npm run dev --prefix frontend -- --port 8000 --strictPort
-
-# 交易进程：无 HTTP 端口，每 5 秒上报心跳
-.venv/bin/python worker.py
 ```
 
-前端将 `/api` 请求代理到后端 `8001`。worker 默认待命；如需启动时执行一次模拟调仓，
-改用 `.venv/bin/python worker.py --pap etf_rotation_pap`。
+前端将 `/api` 请求代理到后端 `8001`。后台交易线程每 5 秒上报心跳，随服务启动和退出。
+后端仅启动一个实例（不要增加 `--workers`）；启动和重启不会自动调仓，手动调仓沿用 `main.py --pap etf_rotation_pap`。
 
-部署时执行 `npm run build --prefix frontend`，只需启动后端和 worker，
+部署时执行 `npm run build --prefix frontend`，只需启动一个后端服务，
 通过 `http://127.0.0.1:8001` 同时访问页面与 API，无需启动前端开发服务。
 当前无登录功能，公网访问需配置认证。
 
@@ -168,10 +165,10 @@ npm run dev --prefix frontend -- --port 8000 --strictPort
 
 | 路径 | 功能 |
 |---|---|
-| `/api/runtime` | 交易进程启动时间、运行时长、心跳和最近任务结果 |
+| `/api/runtime` | 后台交易线程启动时间、运行时长与心跳 |
 | `/api/strategies` | 策略与账户实例列表 |
 | `/api/accounts/{instance_id}` | 最近账户资产与持仓 |
 | `/api/strategies/{strategy_id}/logs` | 日志日期列表，按日期倒序 |
 | `/api/strategies/{strategy_id}/logs/{date}?offset=0` | 指定日期日志，返回内容及下一页偏移量 |
 
-日志日期格式为 `YYYY-MM-DD`；日志按策略归档。最近任务结果仅记录通过 worker 执行的任务。
+日志日期格式为 `YYYY-MM-DD`；日志按策略归档。手动调仓结果通过账户与日志查看。

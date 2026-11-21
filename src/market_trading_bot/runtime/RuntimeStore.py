@@ -1,4 +1,4 @@
-"""独立于账户账本的进程心跳。"""
+"""独立于账户账本的交易线程心跳。"""
 import json
 import sqlite3
 from contextlib import closing
