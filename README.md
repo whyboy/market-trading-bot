@@ -37,14 +37,14 @@ market-trading-bot/
 │   │       ├── log/StrategyLogger.py      # 日志处理代码
 │   │       ├── market/AKShareMarket.py
 │   │       ├── execution/PapExecutor.py
-│   │       └── web/app.py
+│   │       └── app.py
 │   └── test/                              # 核心测试，不与源码包同名
 │       ├── TradingSchedulerTests.py
 │       ├── strategy/ETFRotationStrategyImplTests.py
 │       ├── market/AKShareMarketTests.py
 │       ├── repository/PapAccountRepositoryTests.py
 │       ├── execution/PapExecutorTests.py
-│       └── web/AppTests.py
+│       └── AppTests.py
 ├── AGENTS.md
 └── README.md
 ```

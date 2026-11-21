@@ -11,7 +11,7 @@ from market_trading_bot.repository.PapAccountRepository import PapAccountReposit
 from market_trading_bot.TradingScheduler import TradingScheduler
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @asynccontextmanager
