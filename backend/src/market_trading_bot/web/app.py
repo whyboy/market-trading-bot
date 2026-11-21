@@ -113,7 +113,7 @@ def log_content(strategy_id: str, day: date, offset: int = Query(0, ge=0)):
     return {'content': content.decode('utf-8', errors='replace'), 'next_offset': next_offset, 'has_more': has_more}
 
 
-DIST = ROOT / 'frontend/dist'
+DIST = ROOT.parent / 'frontend/dist'
 if (DIST / 'assets').exists():
     app.mount('/assets', StaticFiles(directory=DIST / 'assets'), name='assets')
 
@@ -121,5 +121,5 @@ if (DIST / 'assets').exists():
 @app.get('/')
 def index():
     if not (DIST / 'index.html').exists():
-        raise HTTPException(503, '请先构建前端：cd frontend && npm ci && npm run build')
+        raise HTTPException(503, '请在项目根目录构建前端：npm ci --prefix frontend && npm run build --prefix frontend')
     return FileResponse(DIST / 'index.html')
