@@ -4,7 +4,7 @@ import threading
 import unittest
 from datetime import date, datetime
 from market_trading_bot.market.AKShareMarket import SHANGHAI
-from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
+from market_trading_bot.service.AccountLedger import AccountLedger
 from market_trading_bot.task.DailySummaryTask import DailySummaryTask
 from pathlib import Path
 from unittest.mock import Mock
@@ -26,7 +26,7 @@ class DailySummaryTaskTests(unittest.TestCase):
                                      self.context, self.stop, lambda: self.current)
 
     def store(self, instance='pap', strategy='etf_rotation'):
-        repository = PapAccountRepository(self.root / 'data', instance, strategy)
+        repository = AccountLedger(self.root / 'data', instance, strategy)
         with repository.transaction('2026-11-20', 100000) as transaction:
             transaction.save_execution({'date': '2026-11-20', 'cash': '100000', 'equity': '100000',
                                                'positions': {}, 'fills': []})

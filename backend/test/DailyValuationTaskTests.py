@@ -6,7 +6,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from market_trading_bot.market.AKShareMarket import SHANGHAI
 from market_trading_bot.notification.PushPlusNotifier import PushPlusNotifier
-from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
+from market_trading_bot.service.AccountLedger import AccountLedger
 from market_trading_bot.task.DailySummaryTask import DailySummaryTask
 from market_trading_bot.task.DailyValuationTask import DailyValuationTask
 from pathlib import Path
@@ -32,7 +32,7 @@ class DailyValuationTaskTests(unittest.TestCase):
             symbol: Decimal('105' if day == self.day else '100') for symbol in symbols}
 
     def store(self, instance='pap'):
-        return PapAccountRepository(self.root / 'data', instance, 'etf_rotation')
+        return AccountLedger(self.root / 'data', instance, 'etf_rotation')
 
     def save_account(self, day, cash='79995', quantity=200):
         repository = self.store()
@@ -48,7 +48,7 @@ class DailyValuationTaskTests(unittest.TestCase):
             return self.task.run()
 
     def result(self, day='2026-11-20'):
-        return PapAccountRepository.get_daily_result(self.root / 'data', 'pap', day)
+        return AccountLedger.get_daily_result(self.root / 'data', 'pap', day)
 
     def test_first_day_uses_actual_initial_cash_and_preserves_execution(self):
         repository = self.save_account(self.day)

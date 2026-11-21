@@ -33,7 +33,9 @@ market-trading-bot/
 │   │       │   ├── ETFRotationStrategyImpl.py
 │   │       │   └── StrategyData.py          # StrategyData、RankedETF
 │   │       ├── repository/                # 数据库访问
-│   │       │   └── PapAccountRepository.py
+│   │       │   ├── AccountRepository.py
+│   │       │   └── DailyResultsRepository.py
+│   │       ├── service/AccountLedger.py  # 账户事务与账本服务
 │   │       ├── log/StrategyLogger.py      # 日志处理代码
 │   │       ├── market/                    # 行情适配及数据
 │   │       │   ├── AKShareMarket.py
@@ -149,7 +151,7 @@ backend/.venv/bin/python backend/main.py
 TaskScheduler → TradingTask（绑定策略＋账户）
                     ├── Market → MarketData → Strategy → StrategyData
                     ├── PapTrader：纯内存模拟调仓
-                    └── PapAccountRepository：账户事务与CSV导出
+                    └── AccountLedger：账户事务与CSV导出，调用账户及每日结果 Repository
 ```
 
 Repository 不依赖执行器。Task 在账户事务内读取最新快照、检查当日结果、调用执行器并保存；任一步失败整体回滚，保证并发防重复与资金一致性。
@@ -235,7 +237,7 @@ Azure 网络安全组放行 TCP `8080` 后，访问 `http://<服务器公网IP>:
 
 每个账户使用独立的 `data/<instance_id>/ledger.sqlite3`，仅含两张表：
 `account` 保存账户、策略、开户资金和创建时间；`daily_results` 每天一行，分别保存交易结果、收盘估值、收益和估值状态。
-旧 `runs` 表首次写入时在事务中自动迁移，保留交易及开户资金；旧账户无法还原的创建时间留空。估值只更新收盘字段，不覆盖交易结果。
+估值只更新收盘字段，不覆盖交易结果。
 收盘价尚未更新、日历异常或任务仍在执行时，间隔 30 秒最多尝试 3 次；15:10 汇总时按保存的状态标注未执行、执行中或失败，不影响其他账户；不使用旧价格代替当天收盘价。
 未开户发送“暂无收益数据”；当天策略未完成记账时，按现有持仓估值并注明。
 

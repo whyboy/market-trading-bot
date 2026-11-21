@@ -4,7 +4,7 @@ import threading
 from datetime import datetime, time
 from decimal import Decimal, ROUND_HALF_UP
 from market_trading_bot.market.AKShareMarket import AKShareMarket, SHANGHAI
-from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
+from market_trading_bot.service.AccountLedger import AccountLedger
 
 
 class DailyValuationTask:
@@ -60,11 +60,11 @@ class DailyValuationTask:
     def _update_account(self, strategy_id, instance):
         """更新账户估值；复用成功结果，后续交易会使旧估值失效。"""
         day = self.context['day']
-        account = PapAccountRepository.get_snapshot(self.directory, instance['id'], day.isoformat())
+        account = AccountLedger.get_snapshot(self.directory, instance['id'], day.isoformat())
         if not account['initialized']:
             return
-        repository = PapAccountRepository(self.directory, instance['id'], strategy_id)
-        result = PapAccountRepository.get_daily_result(self.directory, instance['id'], day.isoformat())
+        repository = AccountLedger(self.directory, instance['id'], strategy_id)
+        result = AccountLedger.get_daily_result(self.directory, instance['id'], day.isoformat())
         # 后续交易会将估值置为 pending；否则重启时复用。
         if result and result['valuation_status'] == 'success' and result['valuation'] is not None:
             return
@@ -72,7 +72,7 @@ class DailyValuationTask:
             repository.set_valuation_status(day.isoformat(), 'failed', self.context['notice'])
             return
         close_day = day if self.context['is_trading_day'] else self.context['previous_trading_day']
-        if not self.context['is_trading_day'] and PapAccountRepository.get_valuation(self.directory, instance['id'], close_day.isoformat()):
+        if not self.context['is_trading_day'] and AccountLedger.get_valuation(self.directory, instance['id'], close_day.isoformat()):
             return
         repository.set_valuation_status(close_day.isoformat(), 'running')
         try:
@@ -93,7 +93,7 @@ class DailyValuationTask:
         if self.is_running(strategy_id, instance_id):
             raise RuntimeError('交易任务仍在运行')
         close_day = day if self.context['is_trading_day'] else self.context['previous_trading_day']
-        account = PapAccountRepository.get_snapshot(self.directory, instance_id, close_day.isoformat())
+        account = AccountLedger.get_snapshot(self.directory, instance_id, close_day.isoformat())
         if not self.context['is_trading_day']:
             if not account['initialized']:
                 raise ValueError('休市日尚无可估值账户')
@@ -102,9 +102,9 @@ class DailyValuationTask:
         if self.is_running(strategy_id, instance_id):
             raise RuntimeError('交易任务仍在运行')
         previous_day = self.context['previous_trading_day']
-        previous = PapAccountRepository.get_valuation(self.directory, instance_id, previous_day.isoformat())
+        previous = AccountLedger.get_valuation(self.directory, instance_id, previous_day.isoformat())
         if previous is None or previous['date'] != previous_day.isoformat():
-            previous_account = PapAccountRepository.get_snapshot(self.directory, instance_id, previous_day.isoformat())
+            previous_account = AccountLedger.get_snapshot(self.directory, instance_id, previous_day.isoformat())
             if previous_account['initialized']:
                 previous = repository.save_valuation(self._closing_assets(market, previous_account, previous_day))
             else:

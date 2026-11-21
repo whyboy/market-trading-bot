@@ -4,7 +4,7 @@ import sqlite3
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
+from market_trading_bot.service.AccountLedger import AccountLedger
 from PapFixture import PapFixture
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -13,7 +13,7 @@ from unittest.mock import Mock, patch
 class PapAccountRepositoryTests(PapFixture, unittest.TestCase):
     def test_restore_sell_before_buy_and_t_plus_zero(self):
         self.rebalance(self.signal(), self.executor, 10000)
-        restored = PapAccountRepository(self.root, 'pap')
+        restored = AccountLedger(self.root, 'pap')
         result = self.rebalance(self.signal(day=23, winner='B'), self.executor, 999999, repository=restored)
         self.assertEqual([fill['side'] for fill in result['fills']], ['sell', 'buy'])
         self.assertNotIn('A', result['positions'])
@@ -52,7 +52,7 @@ class PapAccountRepositoryTests(PapFixture, unittest.TestCase):
         self.account_store.export_trades()
         with (self.account_store.directory / 'account_trades.csv').open(encoding='utf-8-sig') as stream:
             self.assertEqual(next(csv.DictReader(stream))['buy_quantity'], '900')
-        self.assertIsNone(PapAccountRepository(self.root, 'other').get_execution('2026-11-20'))
+        self.assertIsNone(AccountLedger(self.root, 'other').get_execution('2026-11-20'))
 
     def read_trades(self):
         with (self.account_store.directory / 'account_trades.csv').open(encoding='utf-8-sig') as stream:
@@ -90,7 +90,7 @@ class PapAccountRepositoryTests(PapFixture, unittest.TestCase):
         self.account_store.export_trades()
         with sqlite3.connect(self.account_store.database) as connection:
             self.assertEqual(connection.execute('SELECT initial_cash FROM account').fetchone()[0], '10000.00')
-        with patch.object(PapAccountRepository, '_infer_initial_cash', side_effect=AssertionError('不应再次反推')):
+        with patch.object(AccountLedger, '_infer_initial_cash', side_effect=AssertionError('不应再次反推')):
             self.account_store.export_trades()
 
     def test_summary_includes_rotation_and_liquidation(self):
@@ -138,10 +138,10 @@ class PapAccountRepositoryTests(PapFixture, unittest.TestCase):
 
     def test_task_retries_without_market_and_recovers_csv(self):
         task = self.make_task(self.signal())
-        with patch.object(PapAccountRepository, 'export_trades', side_effect=OSError('disk full')):
+        with patch.object(AccountLedger, 'export_trades', side_effect=OSError('disk full')):
             first = task.trade()
         self.assertFalse(first['csv_exported'])
-        with patch.object(PapAccountRepository, 'export_trades', side_effect=sqlite3.OperationalError('database is locked')):
+        with patch.object(AccountLedger, 'export_trades', side_effect=sqlite3.OperationalError('database is locked')):
             self.assertFalse(task.trade()['csv_exported'])
         task.market.reset_mock()
         task.strategy.reset_mock()
