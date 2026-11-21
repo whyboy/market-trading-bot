@@ -64,10 +64,7 @@ class TradingScheduler:
             self.lock_file = None
             raise RuntimeError('已有调度服务运行，请只启动一个后端实例') from None
         try:
-            self.notifier = PushPlusNotifier(self.root, self.settings)
-            if self.notifier.repository is not None:
-                self.timer.add_job(self.notifier.dispatch, 'interval', seconds=5,
-                                   id='_notifications', max_instances=1, coalesce=True)
+            self.notifier = PushPlusNotifier(self.settings)
             for path in sorted((self.root / 'market_trading_bot/config').glob('*_strategy.json')):
                 config = json.loads(path.read_text())
                 if config.get('enable', True):

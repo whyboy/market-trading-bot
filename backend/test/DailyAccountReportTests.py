@@ -1,9 +1,7 @@
-"""每日总结区分交易日收益与休市日最近估值，并与执行报告独立去重。"""
-import tempfile
+"""每日总结区分交易日收益与休市日最近估值。"""
 import unittest
 from market_trading_bot.notification.PushPlusNotifier import PushPlusNotifier
 from market_trading_bot.notification.report.DailyAccountReport import DailyAccountReport
-from pathlib import Path
 from unittest.mock import patch
 
 
@@ -43,17 +41,8 @@ class DailyAccountReportTests(unittest.TestCase):
         self.assertIn('当日收益率：-0.30%', content)
         self.assertIn('持仓：空仓', content)
 
-    def test_daily_and_execution_reports_share_dispatch_but_not_deduplication(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            notifier = PushPlusNotifier(Path(temporary), {
-                'storage': {'data_dir': 'data'}, 'pushplus': {'enabled': True, 'token': 'test-token'}})
-            notifier.repository.enqueue(('etf_rotation', 'pap', '2026-11-20', 'execution'), '执行', '完成')
+    def test_daily_report_is_sent_directly(self):
+        notifier = PushPlusNotifier({'pushplus': {'enabled': True, 'token': 'test-token'}})
+        with patch.object(notifier.client, 'send', return_value='receipt') as send:
             notifier.daily_report('etf_rotation', 'pap', self.summary())
-            notifier.daily_report('etf_rotation', 'pap', self.summary())
-            with patch.object(notifier.client, 'send', return_value='receipt') as send:
-                notifier.dispatch()
-                notifier.dispatch()
-                notifier.dispatch()
-            self.assertEqual(send.call_count, 2)
-            self.assertIn('每日收益总结', send.call_args.args[0])
-            self.assertIsNone(notifier.repository.due())
+        send.assert_called_once_with(*DailyAccountReport.build('etf_rotation', 'pap', self.summary()))

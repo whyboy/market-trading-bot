@@ -1,4 +1,4 @@
-"""通知不得影响交易，发送状态与重试预算必须跨重启保留。"""
+"""直接发送执行报告，通知失败不得影响交易。"""
 import tempfile
 import unittest
 from datetime import datetime
@@ -30,62 +30,24 @@ class PushPlusTests(unittest.TestCase):
             account_repository=SimpleNamespace(directory=self.root / 'data/pap',
                                                latest=lambda *args: {'initial_cash': '100000'}))
 
-    def test_no_fills_still_reports_and_deduplicates_after_restart(self):
-        notifier = PushPlusNotifier(self.root, self.settings)
-        notifier.report(self.task())
-        notifier.report(self.task())
+    def test_no_fills_still_sends_report_directly(self):
+        notifier = PushPlusNotifier(self.settings)
         title, content = TradeExecutionReport.build(self.task())
         self.assertIn('今日无调仓', content)
         self.assertIn('+2.35%', content)
         self.assertIn('非收盘收益', content)
-        restarted = PushPlusNotifier(self.root, self.settings)
-        with patch.object(restarted.client, 'send', return_value='receipt') as send:
-            restarted.dispatch()
-            restarted.report(self.task())
-            restarted.dispatch()
+        with patch.object(notifier.client, 'send', return_value='receipt') as send:
+            notifier.report(self.task())
         send.assert_called_once_with(title, content)
-        self.assertIsNone(restarted.repository.due())
-
-    def test_retry_budget_survives_restart(self):
-        notifier = PushPlusNotifier(self.root, self.settings)
-        notifier.report(self.task())
-        with patch('market_trading_bot.repository.NotificationRepository.time.time', return_value=100):
-            with patch.object(notifier.client, 'send', side_effect=PushPlusClient.Error('timeout', True)):
-                notifier.dispatch()
-            self.assertIsNone(notifier.repository.due())
-        restarted = PushPlusNotifier(self.root, self.settings)
-        with patch('market_trading_bot.repository.NotificationRepository.time.time', return_value=1000):
-            self.assertEqual(restarted.repository.due()['attempts'], 1)
-            with patch.object(restarted.client, 'send', return_value='ok'):
-                restarted.dispatch()
-        self.assertIsNone(restarted.repository.due())
-
-    def test_permanent_error_not_retried(self):
-        notifier = PushPlusNotifier(self.root, self.settings)
-        notifier.report(self.task())
-        with patch.object(notifier.client, 'send', side_effect=PushPlusClient.Error('invalid token')) as send:
-            notifier.dispatch()
-            notifier.dispatch()
-        self.assertEqual(send.call_count, 1)
-        self.assertIsNone(notifier.repository.due())
-
-    def test_maximum_three_attempts(self):
-        notifier = PushPlusNotifier(self.root, self.settings)
-        notifier.report(self.task())
-        with patch.object(notifier.client, 'send', side_effect=PushPlusClient.Error('network', True)) as send:
-            for stamp in (100, 1000, 2000, 3000):
-                with patch('market_trading_bot.repository.NotificationRepository.time.time', return_value=stamp):
-                    notifier.dispatch()
-        self.assertEqual(send.call_count, 3)
-        self.assertIsNone(notifier.repository.due())
-
-    def test_disabled_or_missing_token_does_not_create_database(self):
-        self.settings['pushplus']['enabled'] = False
-        self.assertIsNone(PushPlusNotifier(self.root, self.settings).repository)
-        self.settings['pushplus']['enabled'] = True
-        self.settings['pushplus']['token'] = ''
-        self.assertIsNone(PushPlusNotifier(self.root, self.settings).repository)
         self.assertFalse((self.root / 'data').exists())
+
+    def test_disabled_or_missing_token_skips_report(self):
+        with patch('market_trading_bot.notification.PushPlusNotifier.PushPlusClient') as client:
+            self.settings['pushplus']['enabled'] = False
+            PushPlusNotifier(self.settings).report(self.task())
+            self.settings['pushplus'].update(enabled=True, token='')
+            PushPlusNotifier(self.settings).report(self.task())
+        client.assert_not_called()
 
     def test_failed_report_does_not_expose_exception(self):
         task = self.task()
@@ -101,42 +63,38 @@ class PushPlusTests(unittest.TestCase):
                 status_code=200, json=lambda: {'code': 903, 'msg': 'test-secret'})) as post:
             with self.assertRaises(PushPlusClient.Error) as error:
                 client.send('title', 'content')
-        self.assertFalse(error.exception.retryable)
         self.assertNotIn('test-secret', str(error.exception))
         self.assertEqual(post.call_args.kwargs['json']['channel'], 'wechat')
         self.assertEqual(post.call_args.kwargs['timeout'], (3, 10))
 
     def test_notification_failure_does_not_change_successful_trade(self):
-        notifier = PushPlusNotifier(self.root, self.settings)
+        notifier = PushPlusNotifier(self.settings)
         task = TradingTask(Mock(), Mock(), Mock(), Mock(), Mock(), strategy_id='example',
                            instance_id='pap', initial_cash=100000,
                            scheduled_at=datetime(2026, 11, 20, 14, 30, tzinfo=SHANGHAI), notifier=notifier)
         with patch.object(task, 'run_pap', return_value={'fills': []}) as trade:
             with patch.object(TradeExecutionReport, 'build', return_value=('title', 'content')):
-                with patch.object(notifier.repository, 'enqueue', side_effect=OSError('disk full')) as enqueue:
+                with patch.object(notifier.client, 'send', side_effect=PushPlusClient.Error('network')) as send:
                     task.start()
                     task.thread.join(timeout=3)
         self.assertFalse(task.thread.is_alive())
         self.assertTrue(task.result['success'])
         trade.assert_called_once()
-        enqueue.assert_called_once()
+        send.assert_called_once()
 
-    def test_database_failure_does_not_prevent_service_setup(self):
-        with patch('market_trading_bot.notification.PushPlusNotifier.NotificationRepository', side_effect=OSError('disk full')):
-            self.assertIsNone(PushPlusNotifier(self.root, self.settings).repository)
-
-    def test_failed_trade_is_persisted_without_network_on_trade_thread(self):
-        notifier = PushPlusNotifier(self.root, self.settings)
+    def test_failed_trade_sends_failure_report(self):
+        notifier = PushPlusNotifier(self.settings)
         task = TradingTask(Mock(), Mock(), Mock(), Mock(), Mock(), strategy_id='example',
                            instance_id='pap', initial_cash=100000,
                            scheduled_at=datetime(2026, 11, 20, 14, 30, tzinfo=SHANGHAI), notifier=notifier)
         with patch.object(task, 'run_pap', side_effect=ValueError('bad market data')):
-            with patch.object(notifier.client, 'send') as send:
+            with patch.object(notifier.client, 'send', return_value='receipt') as send:
                 task.start()
                 task.thread.join(timeout=3)
-                send.assert_not_called()
+        self.assertFalse(task.thread.is_alive())
         self.assertFalse(task.result['success'])
-        self.assertIn('失败', notifier.repository.due()['title'])
+        send.assert_called_once()
+        self.assertIn('失败', send.call_args.args[0])
 
     def test_fills_report_contains_trade_details(self):
         task = self.task()
