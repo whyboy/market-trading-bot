@@ -361,6 +361,6 @@ class TaskSchedulerTests(unittest.TestCase):
         self.scheduler.valuation_task = task
         with patch.object(self.scheduler, '_start_valuation', side_effect=lambda: events.append('valuation-start')):
             with patch.object(self.scheduler, '_start_summary', side_effect=lambda: events.append('summary-start')):
-                self.scheduler._recover_daily()
+                self.scheduler._recover_daily_tasks()
         self.assertEqual(events, ['valuation-start', 'valuation-finished', 'summary-start'])
         self.scheduler.valuation_task = None

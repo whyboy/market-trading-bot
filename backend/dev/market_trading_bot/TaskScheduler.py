@@ -86,7 +86,7 @@ class TaskScheduler:
             # 启动时先准备当天日历；晚于收盘估值时间启动时补做估值和日报。
             self.prepare_calender_context()
             if self.now().time() >= time(15, 5):
-                self.timer.add_job(self._recover_daily, args=[self.now().date()], id='_startup_daily_tasks')
+                self.timer.add_job(self._recover_daily_tasks, args=[self.now().date()], id='_startup_daily_tasks')
         except BaseException:
             self.stop()
             raise
@@ -123,7 +123,7 @@ class TaskScheduler:
         finally:
             self.calendar_lock.release()
 
-    def _recover_daily(self, scheduled_day=None):
+    def _recover_daily_tasks(self, scheduled_day=None):
         """晚启动先补估值；已过15:10时等待补估值结束再发送当天日报。"""
         if scheduled_day is not None and scheduled_day != self.now().date():
             return
