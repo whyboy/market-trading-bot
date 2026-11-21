@@ -79,11 +79,6 @@ class TradingScheduler:
             self.stop()
             raise
 
-    @staticmethod
-    def now():
-        """返回北京时间，统一交易日期与策略执行时间的判断口径。"""
-        return datetime.now(SHANGHAI)
-
     def prepare_day(self):
         """确认当天是否交易，并为各策略注册一次性定时回调，不在此处执行策略。
 
@@ -122,10 +117,6 @@ class TradingScheduler:
                         return
         finally:
             self.calendar_guard.release()
-
-    def _heartbeat(self):
-        """更新调度服务心跳；策略执行期间的任务心跳由TradingTask自行维护。"""
-        self.heartbeat_at = datetime.now(timezone.utc).isoformat()
 
     def _start_task(self, path, day=None):
         """到点为每个启用账户创建Task；一个账户运行或装配失败不影响其他账户。"""
@@ -215,3 +206,12 @@ class TradingScheduler:
                                      'last_execution': task_map[(strategy_id, instance['id'])].result
                                      if (strategy_id, instance['id']) in task_map else None}
                                     for instance in config.get('instances', []) if instance['enabled']]}
+
+    def _heartbeat(self):
+        """更新调度服务心跳；策略执行期间的任务心跳由TradingTask自行维护。"""
+        self.heartbeat_at = datetime.now(timezone.utc).isoformat()
+
+    @staticmethod
+    def now():
+        """返回北京时间，统一交易日期与策略执行时间的判断口径。"""
+        return datetime.now(SHANGHAI)

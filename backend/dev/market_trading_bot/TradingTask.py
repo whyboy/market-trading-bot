@@ -35,10 +35,6 @@ class TradingTask:
                        'trade_timeout_seconds': trade_timeout_seconds}
         self.result = None
 
-    @staticmethod
-    def now():
-        return datetime.now(SHANGHAI)
-
     def start(self):
         self.status['current_execution'] = {'instance_id': self.instance_id, 'started_at': self.now().isoformat()}
         self.thread.start()
@@ -46,10 +42,6 @@ class TradingTask:
     def stop(self):
         self.stop_event.set()
         self.thread.join()
-
-    def _heartbeat(self):
-        self.status['heartbeat_at'] = self.now().isoformat()
-        self.status_repository.write(self.status)
 
     def _run(self):
         execution = {**self.status['current_execution'], 'scheduled_at': self.scheduled_at.isoformat()}
@@ -110,3 +102,11 @@ class TradingTask:
                 result['signal'] = asdict(signal)
                 result = transaction.save(result)
         return result
+
+    def _heartbeat(self):
+        self.status['heartbeat_at'] = self.now().isoformat()
+        self.status_repository.write(self.status)
+
+    @staticmethod
+    def now():
+        return datetime.now(SHANGHAI)

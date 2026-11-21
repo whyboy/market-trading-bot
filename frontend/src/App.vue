@@ -16,11 +16,6 @@ const label = computed(() => !runtime.value ? '状态未知' : runtime.value.sta
 const money = (value: unknown) => value == null ? '—' : Number(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const time = (value?: string) => value ? new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '—'
 const uptime = computed(() => runtime.value?.uptime_seconds == null ? '—' : `${Math.floor(runtime.value.uptime_seconds / 3600)} 小时 ${Math.floor(runtime.value.uptime_seconds / 60) % 60} 分钟 ${Math.floor(runtime.value.uptime_seconds) % 60} 秒`)
-async function get<T>(path: string): Promise<T> {
-  const response = await fetch(path)
-  if (!response.ok) throw new Error(`请求失败（${response.status}）`)
-  return response.json()
-}
 let runtimeRequest = 0
 async function refreshRuntime() {
   const request = ++runtimeRequest
@@ -71,6 +66,11 @@ onMounted(async () => {
   catch (e) { error.value = String(e) }
 })
 onUnmounted(() => { clearInterval(timer); ++runtimeRequest; ++logRequest; ++accountRequest; ++dateRequest })
+async function get<T>(path: string): Promise<T> {
+  const response = await fetch(path)
+  if (!response.ok) throw new Error(`请求失败（${response.status}）`)
+  return response.json()
+}
 </script>
 
 <template>

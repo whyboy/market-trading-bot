@@ -49,24 +49,6 @@ class PapAccountRepository:
             row = connection.execute('SELECT payload FROM runs WHERE day = ?', (day,)).fetchone()
         return json.loads(row[0]) if row else None
 
-    class Transaction:
-        """仅供事务内使用的账户快照与保存入口，不依赖策略或执行器。"""
-
-        def __init__(self, connection, day, account, completed):
-            self.connection = connection
-            self.day = day
-            self.account = account
-            self.completed = completed
-            self.saved = False
-
-        def save(self, result: dict) -> dict:
-            if self.completed is not None or result['date'] != self.day:
-                raise ValueError('不能覆盖已完成结果或保存其他日期的结果')
-            payload = json.dumps(result, ensure_ascii=False, default=str, allow_nan=False)
-            self.connection.execute('INSERT INTO runs VALUES (?, ?)', (self.day, payload))
-            self.saved = True
-            return json.loads(payload)
-
     @contextmanager
     def transaction(self, day: str, initial_cash: float):
         """锁定最新账户并检查当日结果，由调用方计算后保存，整体提交或回滚。"""
@@ -90,26 +72,23 @@ class PapAccountRepository:
             if completed is None and not transaction.saved:
                 raise RuntimeError('账户事务必须保存执行结果')
 
-    @staticmethod
-    def _restore_initial_cash(runs: list[dict]) -> Decimal:
-        """从旧账本首笔记账的现金流还原开户资金。"""
-        initial_cash = Decimal(runs[0]['cash']) if runs else Decimal('0')
-        if runs:
-            for fill in runs[0]['fills']:
-                amount, fee = Decimal(fill['amount']), Decimal(fill['commission'])
-                initial_cash += amount + fee if fill['side'] == 'buy' else fee - amount
-        return initial_cash
+    class Transaction:
+        """仅供事务内使用的账户快照与保存入口，不依赖策略或执行器。"""
 
-    @classmethod
-    def _initial_cash(cls, connection: sqlite3.Connection, runs: list[dict]) -> Decimal:
-        """读取开户资金；旧账本仅首次读取时从首笔记账反推并补存。"""
-        row = connection.execute('SELECT initial_cash FROM account WHERE id = 1').fetchone()
-        if row:
-            return Decimal(row[0])
-        initial_cash = cls._restore_initial_cash(runs)
-        if runs:
-            connection.execute('INSERT INTO account VALUES (1, ?)', (str(initial_cash),))
-        return initial_cash
+        def __init__(self, connection, day, account, completed):
+            self.connection = connection
+            self.day = day
+            self.account = account
+            self.completed = completed
+            self.saved = False
+
+        def save(self, result: dict) -> dict:
+            if self.completed is not None or result['date'] != self.day:
+                raise ValueError('不能覆盖已完成结果或保存其他日期的结果')
+            payload = json.dumps(result, ensure_ascii=False, default=str, allow_nan=False)
+            self.connection.execute('INSERT INTO runs VALUES (?, ?)', (self.day, payload))
+            self.saved = True
+            return json.loads(payload)
 
     def export_csv(self):
         """重建账户交易汇总，每个有成交的日期一行；无成交只保留在 SQLite。
@@ -156,3 +135,24 @@ class PapAccountRepository:
             # 新汇总成功后清理旧版自动导出的明细文件，SQLite 明细始终保留。
             for name in ('runs', 'equity', 'orders', 'fills', 'positions', 'signals'):
                 (self.directory / f'{name}.csv').unlink(missing_ok=True)
+
+    @classmethod
+    def _initial_cash(cls, connection: sqlite3.Connection, runs: list[dict]) -> Decimal:
+        """读取开户资金；旧账本仅首次读取时从首笔记账反推并补存。"""
+        row = connection.execute('SELECT initial_cash FROM account WHERE id = 1').fetchone()
+        if row:
+            return Decimal(row[0])
+        initial_cash = cls._restore_initial_cash(runs)
+        if runs:
+            connection.execute('INSERT INTO account VALUES (1, ?)', (str(initial_cash),))
+        return initial_cash
+
+    @staticmethod
+    def _restore_initial_cash(runs: list[dict]) -> Decimal:
+        """从旧账本首笔记账的现金流还原开户资金。"""
+        initial_cash = Decimal(runs[0]['cash']) if runs else Decimal('0')
+        if runs:
+            for fill in runs[0]['fills']:
+                amount, fee = Decimal(fill['amount']), Decimal(fill['commission'])
+                initial_cash += amount + fee if fill['side'] == 'buy' else fee - amount
+        return initial_cash

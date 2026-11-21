@@ -42,49 +42,6 @@ class AKShareMarket:
             raise ValueError('行情超时、时效和回溯天数必须为正数')
         ak_config.timeout = self.timeout
 
-    def _request(self, function, **kwargs):
-        """按配置限制请求开始时间的间隔，透传参数、结果和异常。"""
-        remaining = self.interval - (clock.monotonic() - self.last_request)
-        if remaining > 0:
-            clock.sleep(remaining)
-        self.last_request = clock.monotonic()
-        return function(**kwargs)
-
-    def _quotes(self, secids: dict[str, str]) -> dict[str, tuple[float, datetime]]:
-        """批量获取当前报价，要求每个标的恰好返回一条。
-
-        :param secids: 东方财富市场代码到项目标的代码的映射。
-        :return: 标的到（未复权价格、北京时间报价时间）的映射。
-        :raises MarketDataError: 返回数据错误、缺失或重复。
-        """
-        response = self._request(
-            requests.get, url='https://push2.eastmoney.com/api/qt/ulist.np/get',
-            params={'secids': ','.join(secids), 'fields': 'f2,f12,f13,f124', 'fltt': '2'},
-            timeout=self.timeout)
-        response.raise_for_status()
-        payload = response.json()
-        if payload.get('rc') != 0 or not payload.get('data'):
-            raise MarketDataError('当前报价接口返回错误或空数据')
-        quotes = {}
-        for item in payload['data']['diff']:
-            key = f"{item['f13']}.{item['f12']}"
-            if key not in secids or key in quotes:
-                raise MarketDataError('当前报价包含错误或重复证券代码')
-            quotes[key] = (float(item['f2']), datetime.fromtimestamp(int(item['f124']), SHANGHAI))
-        if set(quotes) != set(secids):
-            raise MarketDataError('当前报价缺少标的')
-        return {secids[key]: value for key, value in quotes.items()}
-
-    @staticmethod
-    def _check_session(as_of: datetime):
-        """检查北京时间是否处于连续交易时段；不满足时抛出 MarketDataError。"""
-        if not (time(9, 30) <= as_of.time() <= time(11, 30) or time(13) <= as_of.time() <= time(15)):
-            raise MarketDataError('当前不在A股连续交易时段，策略执行时间为14:30')
-
-    def trading_calendar(self):
-        """获取完整交易日历，沿用行情请求超时和间隔配置。"""
-        return sorted(set(self._request(ak.calendar_trade_date_hist_sina)['trade_date']))
-
     def load(self, symbols: tuple[str, ...], history_points: int) -> tuple[datetime, dict[str, MarketSnapshot]]:
         """加载连续历史交易日收盘价，再批量获取当日盘中报价。
 
@@ -158,3 +115,46 @@ class AKShareMarket:
         except Exception as exc:
             self.logger.error('行情接口请求或解析失败: %s', exc)
             raise MarketDataError(f'行情获取失败: {exc}') from exc
+
+    def trading_calendar(self):
+        """获取完整交易日历，沿用行情请求超时和间隔配置。"""
+        return sorted(set(self._request(ak.calendar_trade_date_hist_sina)['trade_date']))
+
+    def _quotes(self, secids: dict[str, str]) -> dict[str, tuple[float, datetime]]:
+        """批量获取当前报价，要求每个标的恰好返回一条。
+
+        :param secids: 东方财富市场代码到项目标的代码的映射。
+        :return: 标的到（未复权价格、北京时间报价时间）的映射。
+        :raises MarketDataError: 返回数据错误、缺失或重复。
+        """
+        response = self._request(
+            requests.get, url='https://push2.eastmoney.com/api/qt/ulist.np/get',
+            params={'secids': ','.join(secids), 'fields': 'f2,f12,f13,f124', 'fltt': '2'},
+            timeout=self.timeout)
+        response.raise_for_status()
+        payload = response.json()
+        if payload.get('rc') != 0 or not payload.get('data'):
+            raise MarketDataError('当前报价接口返回错误或空数据')
+        quotes = {}
+        for item in payload['data']['diff']:
+            key = f"{item['f13']}.{item['f12']}"
+            if key not in secids or key in quotes:
+                raise MarketDataError('当前报价包含错误或重复证券代码')
+            quotes[key] = (float(item['f2']), datetime.fromtimestamp(int(item['f124']), SHANGHAI))
+        if set(quotes) != set(secids):
+            raise MarketDataError('当前报价缺少标的')
+        return {secids[key]: value for key, value in quotes.items()}
+
+    @staticmethod
+    def _check_session(as_of: datetime):
+        """检查北京时间是否处于连续交易时段；不满足时抛出 MarketDataError。"""
+        if not (time(9, 30) <= as_of.time() <= time(11, 30) or time(13) <= as_of.time() <= time(15)):
+            raise MarketDataError('当前不在A股连续交易时段，策略执行时间为14:30')
+
+    def _request(self, function, **kwargs):
+        """按配置限制请求开始时间的间隔，透传参数、结果和异常。"""
+        remaining = self.interval - (clock.monotonic() - self.last_request)
+        if remaining > 0:
+            clock.sleep(remaining)
+        self.last_request = clock.monotonic()
+        return function(**kwargs)
