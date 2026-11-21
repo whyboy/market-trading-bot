@@ -1,4 +1,5 @@
 """直接发送执行报告，通知失败不得影响交易。"""
+import requests
 import tempfile
 import unittest
 from datetime import datetime
@@ -9,7 +10,7 @@ from market_trading_bot.notification.report.TradeExecutionReport import TradeExe
 from market_trading_bot.TradingTask import TradingTask
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import call, Mock, patch
 
 
 class PushPlusTests(unittest.TestCase):
@@ -55,6 +56,7 @@ class PushPlusTests(unittest.TestCase):
                 status_code=200, json=lambda: {'code': 903, 'msg': 'test-secret'})) as post:
             with self.assertRaises(PushPlusClient.Error) as error:
                 client.send('title', 'content')
+        post.assert_called_once()
         self.assertNotIn('test-secret', str(error.exception))
         self.assertEqual(post.call_args.kwargs['json']['channel'], 'wechat')
         self.assertEqual(post.call_args.kwargs['timeout'], (3, 10))
@@ -97,3 +99,41 @@ class PushPlusTests(unittest.TestCase):
         self.assertIn('买入 510300.XSHG × 100 份', content)
         self.assertIn('手续费 5.00 元', content)
         self.assertNotIn('今日无调仓', content)
+
+    def test_network_failure_retries_then_succeeds(self):
+        response = Mock(status_code=200, json=lambda: {'code': 200, 'data': 'receipt'})
+        with patch('market_trading_bot.notification.PushPlusClient.requests.post',
+                   side_effect=[requests.Timeout('secret'), requests.ConnectionError('secret'), response]) as post:
+            with patch('market_trading_bot.notification.PushPlusClient.time.sleep') as sleep:
+                receipt = PushPlusClient('test-secret').send('title', 'content')
+        self.assertEqual(receipt, 'receipt')
+        self.assertEqual(post.call_count, 3)
+        self.assertEqual(sleep.call_args_list, [call(1), call(2)])
+
+    def test_network_failure_stops_after_three_attempts(self):
+        with patch('market_trading_bot.notification.PushPlusClient.requests.post',
+                   side_effect=requests.Timeout('test-secret')) as post:
+            with patch('market_trading_bot.notification.PushPlusClient.time.sleep') as sleep:
+                with self.assertRaises(PushPlusClient.Error) as error:
+                    PushPlusClient('test-secret').send('title', 'content')
+        self.assertEqual(post.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+        self.assertNotIn('test-secret', str(error.exception))
+
+    def test_temporary_service_errors_retry_and_permanent_http_errors_do_not(self):
+        for status, code, attempts in ((503, 0, 3), (429, 0, 3), (200, 500, 3), (403, 0, 1)):
+            with self.subTest(status=status, code=code):
+                with patch('market_trading_bot.notification.PushPlusClient.requests.post',
+                           return_value=Mock(status_code=status, json=lambda: {'code': code})) as post:
+                    with patch('market_trading_bot.notification.PushPlusClient.time.sleep'):
+                        with self.assertRaises(PushPlusClient.Error):
+                            PushPlusClient('test-secret').send('title', 'content')
+                self.assertEqual(post.call_count, attempts)
+
+    def test_success_does_not_retry(self):
+        with patch('market_trading_bot.notification.PushPlusClient.requests.post',
+                   return_value=Mock(status_code=200, json=lambda: {'code': 200, 'data': 'receipt'})) as post:
+            with patch('market_trading_bot.notification.PushPlusClient.time.sleep') as sleep:
+                self.assertEqual(PushPlusClient('test-secret').send('title', 'content'), 'receipt')
+        post.assert_called_once()
+        sleep.assert_not_called()

@@ -16,6 +16,9 @@ DUE = datetime(2026, 11, 20, 14, 30, tzinfo=SHANGHAI)
 
 class TradingSchedulerTests(unittest.TestCase):
     def setUp(self):
+        sender = patch('market_trading_bot.notification.PushPlusClient.PushPlusClient.send', return_value='receipt')
+        sender.start()
+        self.addCleanup(sender.stop)
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         (self.root / 'market_trading_bot/config').mkdir(parents=True)
