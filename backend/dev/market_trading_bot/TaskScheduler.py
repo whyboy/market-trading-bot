@@ -5,7 +5,6 @@ import logging
 import threading
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime, time, timezone
-from market_trading_bot.config import load_settings
 from market_trading_bot.log.StrategyLogger import strategy_logging
 from market_trading_bot.market.AKShareMarket import AKShareMarket, SHANGHAI
 from market_trading_bot.notification.PushPlusNotifier import PushPlusNotifier
@@ -25,7 +24,6 @@ class TaskScheduler:
     def __init__(self, root: Path):
         """准备调度器；root 为 backend/dev 目录。"""
         self.root = root
-        self.test_mode = False
         self.tasks = {}  # (策略ID, 账户ID) -> 最近一次任务（可能已完成）
         self.configs = {}
         self.calendar_day = None
@@ -51,7 +49,7 @@ class TaskScheduler:
 
     def start(self):
         """取得部署锁并注册定时任务；晚启动补做当天日历、估值和日报。"""
-        self.settings = load_settings(self.root)
+        self.settings = json.loads((self.root / 'market_trading_bot/config/global.json').read_text())
         self.test_mode = self.settings.get('runtime', {}).get('test_mode', False)
         directory = self.root / self.settings['storage']['data_dir'] / 'runtime'
         directory.mkdir(parents=True, exist_ok=True)
@@ -129,7 +127,7 @@ class TaskScheduler:
             due = datetime.combine(day, time.fromisoformat(config['schedule']['trade_time']), SHANGHAI)
             if due > self.now():
                 self.timer.add_job(self._start_trades, 'date', run_date=due, args=[strategy_id, day],
-                                   id=strategy_id, replace_existing=True, misfire_grace_time=300 if self.test_mode else 5)
+                                   id=strategy_id, replace_existing=True, misfire_grace_time=5)
 
     def _recover_daily(self):
         """晚启动先补估值；已过15:10时等待补估值结束再发送当天日报。"""
@@ -299,7 +297,7 @@ class TaskScheduler:
         healthy = self.timer.running and (now - datetime.fromisoformat(self.heartbeat_at)).total_seconds() <= 20
         job = self.timer.get_job(strategy_id)
         config = self.configs.get(strategy_id, {})
-        return {**status, 'test_mode': self.test_mode, 'strategy': strategy_id, 'state': 'running' if active_tasks else 'idle',
+        return {**status, 'strategy': strategy_id, 'state': 'running' if active_tasks else 'idle',
                 'online': healthy and not timed_out,
                 'health': 'trade_timeout' if timed_out else 'idle' if healthy else 'stopped',
                 'heartbeat_scope': 'task' if active_tasks else 'scheduler',

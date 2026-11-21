@@ -28,6 +28,8 @@ class AfterHoursTests(unittest.TestCase):
         directory.mkdir(parents=True)
         settings = json.loads((ROOT / 'market_trading_bot/config/global.json').read_text())
         settings['runtime']['test_mode'] = True
+        settings['storage']['data_dir'] = 'data/test'
+        settings['logging']['directory'] = 'logs/test'
         settings['market']['request_interval_seconds'] = 0
         settings['pushplus']['token'] = 'test-token'
         self.settings = settings
@@ -85,7 +87,6 @@ class AfterHoursTests(unittest.TestCase):
             self.assertEqual(task.output['signal']['ranking'][0]['quote_time'], '2026-11-20 15:00:00+08:00')
             self.assertTrue(client.get('/api/accounts/etf_rotation_pap').json()['initialized'])
             status = client.get('/api/runtime?strategy_id=etf_rotation&instance_id=etf_rotation_pap').json()
-            self.assertTrue(status['test_mode'])
             self.assertTrue(status['last_execution']['success'])
             days = client.get('/api/strategies/etf_rotation/logs').json()
             log = client.get(f'/api/strategies/etf_rotation/logs/{days[0]}').json()['content']
