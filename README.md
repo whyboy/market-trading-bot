@@ -1,6 +1,6 @@
 # market-trading-bot
 
-ETF 动量轮动工具，支持实时信号预览和手动模拟调仓。模拟账户使用 SQLite 原子记账，可恢复、可防止同日重复成交，并导出账户交易汇总 CSV。
+ETF 动量轮动工具，支持实时信号预览、手动模拟调仓和网页运行监控。模拟账户使用 SQLite 原子记账，可恢复、可防止同日重复成交，并导出账户交易汇总 CSV。
 
 当前仅实现 `etf_rotation` 策略和 `pap` 模拟模式。定时任务、收盘日报和推送尚未实现。
 
@@ -125,3 +125,51 @@ python -m venv .venv
 ## 日志
 
 日志写入 `logs/<strategy>/YYYY-MM-DD.log`，默认保留最近 30 个有日志的日期。日志包含运行状态、行情区间、报价、策略排名、目标权重和模拟成交摘要，不记录 Token。
+
+## 网页运行监控（第一版）
+
+Vue 3 前端 + FastAPI 后端，支持运行状态、策略与账户概览、按日期查看和刷新日志。
+账户展示最近调仓估值，非实时估值；暂不支持定时调度和日报。
+
+### 端口与启动
+
+以下命令从项目根目录执行，需要 Python 3.12+、Node.js 20.19+ 或 22.12+。
+
+首次安装：
+
+```bash
+.venv/bin/python -m pip install -r requirements.txt
+npm ci --prefix frontend
+```
+
+开发时分别在两个终端启动：
+
+```bash
+# 后端：8001，自动启动后台交易线程
+.venv/bin/python -m uvicorn market_trading_bot.web.app:app --app-dir src --host 127.0.0.1 --port 8001
+
+# 前端：8000，浏览器打开 http://127.0.0.1:8000
+npm run dev --prefix frontend -- --port 8000 --strictPort
+```
+
+前端将 `/api` 请求代理到后端 `8001`。后台线程待命时每 5 秒更新心跳，执行交易时暂停心跳，完成后记录结果并恢复心跳；线程随服务启停。
+待命超过 20 秒未更新心跳判定失联；交易执行超时由 `runtime.trade_timeout_seconds` 配置，默认 300 秒。
+超时只标记异常，不会强制中断或重试交易。
+后端仅启动一个实例（不要增加 `--workers`）；启动和重启不会自动调仓，手动调仓沿用 `main.py --pap etf_rotation_pap`。
+
+部署时执行 `npm run build --prefix frontend`，只需启动一个后端服务，
+通过 `http://127.0.0.1:8001` 同时访问页面与 API，无需启动前端开发服务。
+
+### API
+
+以下均为只读 `GET` 接口：
+
+| 路径 | 功能 |
+|---|---|
+| `/api/runtime` | 后台交易线程启动时间、运行时长与心跳 |
+| `/api/strategies` | 策略与账户实例列表 |
+| `/api/accounts/{instance_id}` | 最近账户资产与持仓 |
+| `/api/strategies/{strategy_id}/logs` | 日志日期列表，按日期倒序 |
+| `/api/strategies/{strategy_id}/logs/{date}?offset=0` | 指定日期日志，返回内容及下一页偏移量 |
+
+日志日期格式为 `YYYY-MM-DD`；日志按策略归档。手动调仓结果通过账户与日志查看。后台线程提供内部 `submit_trade()` 入口，供后续调度接入，页面仍为只读。
