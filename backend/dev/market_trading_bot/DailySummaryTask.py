@@ -1,5 +1,6 @@
-"""每天生成收盘估值和收益总结，直接推送，不改变交易账本。"""
+"""一次性日报任务：依据调度器提供的交易日期汇总所有策略和账户并发送。"""
 import logging
+import threading
 from datetime import datetime, time
 from decimal import Decimal, ROUND_HALF_UP
 from market_trading_bot.market.AKShareMarket import AKShareMarket, SHANGHAI
@@ -7,11 +8,14 @@ from market_trading_bot.repository.DailyValuationRepository import DailyValuatio
 from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
 
 
-class DailyAccountService:
+class DailySummaryTask:
     class Stopped(RuntimeError):
         pass
 
-    def __init__(self, root, settings, configs, notifier, stop_event, is_running, now):
+    def __init__(self, root, settings, configs, notifier, context, stop_event, is_running, now):
+        self.context = context
+        self.thread = threading.Thread(target=self._run, name='daily-summary-task', daemon=True)
+        self.completed = False
         self.directory = root / settings['storage']['data_dir']
         self.settings = settings
         self.configs = configs
@@ -22,44 +26,57 @@ class DailyAccountService:
         self.valuations = DailyValuationRepository(self.directory / 'runtime')
         self.logger = logging.getLogger(__name__)
 
-    def send_reports(self, day):
-        """每个启用的模拟账户一份日报；行情未更新时最多尝试 3 次，间隔 30 秒。"""
-        accounts = [(strategy_id, instance) for strategy_id, config in self.configs.items()
-                    for instance in config.get('instances', []) if instance['enabled'] and instance['mode'] == 'pap']
-        if not accounts:
-            return True
+    def start(self):
+        """由调度器在15:05创建并启动一次性汇总线程。"""
+        self.thread.start()
+
+    def stop(self):
+        self.stop_event.set()
+        self.thread.join()
+
+    def _run(self):
         try:
-            market = AKShareMarket(self.settings['market'])
-            calendar = self._retry(lambda: self._calendar(market, day), day)
-        except self.Stopped:
-            return False
+            self.completed = self.run()
         except Exception:
-            self.logger.exception('日报交易日历获取失败')
+            self.logger.exception('每日汇总任务失败')
+
+    def run(self):
+        """汇总所有启用策略及账户，单个账户失败不影响其他账户，最终只发送一份报告。"""
+        day = self.context['day']
+        accounts = [(strategy_id, instance) for strategy_id, config in sorted(self.configs.items())
+                    for instance in config.get('instances', []) if instance['enabled'] and instance['mode'] == 'pap']
+        summaries = []
+        if self.context.get('notice'):
+            summaries = [{'strategy_id': strategy_id, 'instance_id': instance['id'],
+                          'summary': {'notice': self.context['notice']}} for strategy_id, instance in accounts]
+        elif accounts:
+            market = AKShareMarket(self.settings['market'])
             for strategy_id, instance in accounts:
-                self._notice(strategy_id, instance['id'], day, '交易日历获取失败，未生成收益估值，请查看日志。')
-            return True
-        for strategy_id, instance in accounts:
-            try:
-                summary = self._retry(lambda: self._summary(market, calendar, strategy_id, instance['id'], day), day)
-                self.notifier.send_daily_account_report(strategy_id, instance['id'], summary)
-            except self.Stopped:
-                return False
-            except Exception:
-                self.logger.exception('日报估值失败 strategy=%s instance=%s', strategy_id, instance['id'])
-                self._notice(strategy_id, instance['id'], day, '收盘估值失败或交易任务仍在运行，未生成收益，请查看日志。')
+                try:
+                    summary = self._retry(lambda: self._summary(market, strategy_id, instance['id']), day)
+                except self.Stopped:
+                    return False
+                except Exception:
+                    self.logger.exception('日报估值失败 strategy=%s instance=%s', strategy_id, instance['id'])
+                    summary = {'notice': '收盘估值失败或交易任务仍在运行，未生成收益，请查看日志。'}
+                summaries.append({'strategy_id': strategy_id, 'instance_id': instance['id'], 'summary': summary})
+        if self.stop_event.is_set() or self.now().date() != day:
+            return False
+        self.notifier.send_daily_summary_report(day, summaries)
         return True
 
-    def _summary(self, market, calendar, strategy_id, instance_id, day):
+    def _summary(self, market, strategy_id, instance_id):
+        day = self.context['day']
         if self.is_running(strategy_id, instance_id):
             raise RuntimeError('交易任务仍在运行')
         account = PapAccountRepository.get_account_snapshot_on_or_before(self.directory, instance_id, day.isoformat())
         if not account['initialized']:
             return {'date': day.isoformat(), 'notice': '账户尚未开户，暂无持仓和收益数据。'}
-        trading = day in calendar
+        trading = self.context['is_trading_day']
         if not trading:
             previous = self.valuations.find_latest_on_or_before(instance_id, day.isoformat())
             if previous is None:
-                close_day = max(value for value in calendar if value < day)
+                close_day = self.context['previous_trading_day']
                 account = PapAccountRepository.get_account_snapshot_on_or_before(self.directory, instance_id, close_day.isoformat())
                 if not account['initialized']:
                     return {'date': day.isoformat(), 'notice': '今日休市，尚无有效收盘估值。'}
@@ -71,7 +88,7 @@ class DailyAccountService:
             if self.is_running(strategy_id, instance_id):
                 raise RuntimeError('交易任务仍在运行')
             snapshot = self.valuations.save_if_absent(instance_id, snapshot)
-        previous_day = max(value for value in calendar if value < day)
+        previous_day = self.context['previous_trading_day']
         previous = self.valuations.find_latest_on_or_before(instance_id, previous_day.isoformat())
         if previous is None or previous['date'] != previous_day.isoformat():
             previous_account = PapAccountRepository.get_account_snapshot_on_or_before(self.directory, instance_id, previous_day.isoformat())
@@ -103,12 +120,6 @@ class DailyAccountService:
                 'cumulative_pnl': str(equity - initial),
                 'cumulative_return_pct': str((equity / initial - 1) * 100)}
 
-    def _calendar(self, market, day):
-        calendar = market.trading_calendar()
-        if not calendar or not calendar[0] < day <= calendar[-1]:
-            raise ValueError('交易日历未覆盖当前日期及比较基准')
-        return calendar
-
     def _retry(self, function, day):
         for attempt in range(3):
             if self.stop_event.is_set() or self.now().date() != day:
@@ -125,6 +136,3 @@ class DailyAccountService:
                     raise
                 if self.stop_event.wait(30):
                     raise self.Stopped() from None
-
-    def _notice(self, strategy_id, instance_id, day, message):
-        self.notifier.send_daily_account_report(strategy_id, instance_id, {'date': day.isoformat(), 'notice': message})

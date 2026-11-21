@@ -1,17 +1,17 @@
-"""真实账本上的收盘收益、休市报告与故障隔离。"""
+"""一次性日报任务的收盘收益、跨策略汇总与故障隔离。"""
 import tempfile
 import threading
 import unittest
 from datetime import date, datetime
 from decimal import Decimal
+from market_trading_bot.DailySummaryTask import DailySummaryTask
 from market_trading_bot.market.AKShareMarket import SHANGHAI
-from market_trading_bot.notification.DailyAccountService import DailyAccountService
 from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 
-class DailyAccountServiceTests(unittest.TestCase):
+class DailySummaryTaskTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -24,8 +24,9 @@ class DailyAccountServiceTests(unittest.TestCase):
         self.notifier = Mock()
         self.stop = threading.Event()
         self.running = Mock(return_value=False)
-        self.service = DailyAccountService(self.root, self.settings, self.configs, self.notifier,
-                                           self.stop, self.running, lambda: self.current)
+        self.context = {'day': self.day, 'is_trading_day': True, 'previous_trading_day': date(2026, 11, 19)}
+        self.service = DailySummaryTask(self.root, self.settings, self.configs, self.notifier, self.context,
+                                        self.stop, self.running, lambda: self.current)
         self.market = Mock()
         self.market.trading_calendar.return_value = self.calendar
         self.market.closing_prices.side_effect = lambda symbols, day: {
@@ -41,7 +42,7 @@ class DailyAccountServiceTests(unittest.TestCase):
         return repository
 
     def summary(self):
-        return self.service._summary(self.market, self.calendar, 'etf_rotation', 'pap', self.day)
+        return self.service._summary(self.market, 'etf_rotation', 'pap')
 
     def test_first_day_uses_actual_initial_cash_and_includes_fees(self):
         repository = self.save_account(self.day)
@@ -96,7 +97,8 @@ class DailyAccountServiceTests(unittest.TestCase):
         self.save_account(self.day)
         close = self.summary()
         self.market.closing_prices.reset_mock()
-        summary = self.service._summary(self.market, self.calendar, 'etf_rotation', 'pap', date(2026, 11, 21))
+        self.context.update(day=date(2026, 11, 21), is_trading_day=False, previous_trading_day=self.day)
+        summary = self.service._summary(self.market, 'etf_rotation', 'pap')
         self.assertFalse(summary['is_trading_day'])
         self.assertEqual(summary['date'], '2026-11-21')
         self.assertEqual(summary['as_of'], close['as_of'])
@@ -104,7 +106,8 @@ class DailyAccountServiceTests(unittest.TestCase):
 
     def test_first_holiday_run_builds_last_trading_day_close(self):
         self.save_account(self.day)
-        summary = self.service._summary(self.market, self.calendar, 'etf_rotation', 'pap', date(2026, 11, 21))
+        self.context.update(day=date(2026, 11, 21), is_trading_day=False, previous_trading_day=self.day)
+        summary = self.service._summary(self.market, 'etf_rotation', 'pap')
         self.assertFalse(summary['is_trading_day'])
         self.assertEqual(summary['as_of'], '2026-11-20T15:00:00+08:00')
         self.market.closing_prices.assert_called_once()
@@ -113,47 +116,49 @@ class DailyAccountServiceTests(unittest.TestCase):
         self.save_account(self.day)
         self.configs['etf_rotation']['instances'].append({'id': 'second', 'enabled': True, 'mode': 'pap'})
         self.market.closing_prices.side_effect = ValueError('missing close')
-        with patch('market_trading_bot.notification.DailyAccountService.AKShareMarket', return_value=self.market):
+        with patch('market_trading_bot.DailySummaryTask.AKShareMarket', return_value=self.market):
             with patch.object(self.stop, 'wait', return_value=False) as wait:
-                self.assertTrue(self.service.send_reports(self.day))
+                self.assertTrue(self.service.run())
         self.assertEqual(wait.call_count, 2)
         self.assertEqual(self.market.closing_prices.call_count, 3)
-        calls = self.notifier.send_daily_account_report.call_args_list
-        self.assertEqual(len(calls), 2)
-        self.assertIn('估值失败', calls[0].args[2]['notice'])
-        self.assertIn('尚未开户', calls[1].args[2]['notice'])
+        self.notifier.send_daily_summary_report.assert_called_once()
+        accounts = self.notifier.send_daily_summary_report.call_args.args[1]
+        self.assertEqual(len(accounts), 2)
+        self.assertIn('估值失败', accounts[0]['summary']['notice'])
+        self.assertIn('尚未开户', accounts[1]['summary']['notice'])
         self.assertIsNone(self.service.valuations.find_latest_on_or_before('pap', self.day.isoformat()))
 
     def test_delayed_close_retries_and_succeeds(self):
         self.save_account(self.day)
         self.market.closing_prices.side_effect = [ValueError('not ready'), {'510300.XSHG': Decimal('105')}]
-        with patch('market_trading_bot.notification.DailyAccountService.AKShareMarket', return_value=self.market):
+        with patch('market_trading_bot.DailySummaryTask.AKShareMarket', return_value=self.market):
             with patch.object(self.stop, 'wait', return_value=False) as wait:
-                self.service.send_reports(self.day)
+                self.service.run()
         wait.assert_called_once_with(30)
-        self.assertEqual(self.notifier.send_daily_account_report.call_args.args[2]['equity'], '100995.00')
+        self.assertEqual(self.notifier.send_daily_summary_report.call_args.args[1][0]['summary']['equity'], '100995.00')
 
-    def test_stop_interrupts_retry_without_sending_notice(self):
-        self.market.trading_calendar.side_effect = ValueError('offline')
-        with patch('market_trading_bot.notification.DailyAccountService.AKShareMarket', return_value=self.market):
+    def test_stop_interrupts_retry_without_sending_report(self):
+        self.save_account(self.day)
+        self.market.closing_prices.side_effect = ValueError('offline')
+        with patch('market_trading_bot.DailySummaryTask.AKShareMarket', return_value=self.market):
             with patch.object(self.stop, 'wait', return_value=True):
-                self.assertFalse(self.service.send_reports(self.day))
-        self.notifier.send_daily_account_report.assert_not_called()
+                self.assertFalse(self.service.run())
+        self.notifier.send_daily_summary_report.assert_not_called()
 
-    def test_out_of_range_calendar_never_mislabels_a_trading_day_as_holiday(self):
-        self.market.trading_calendar.return_value = [date(2025, 1, 1)]
-        with patch('market_trading_bot.notification.DailyAccountService.AKShareMarket', return_value=self.market):
-            with patch.object(self.stop, 'wait', return_value=False):
-                self.service.send_reports(self.day)
-        self.assertIn('交易日历获取失败', self.notifier.send_daily_account_report.call_args.args[2]['notice'])
+    def test_calendar_failure_from_scheduler_is_reported_once_without_fetching_calendar(self):
+        self.context['notice'] = '交易日历获取失败，请查看日志。'
+        self.assertTrue(self.service.run())
+        self.market.trading_calendar.assert_not_called()
+        self.notifier.send_daily_summary_report.assert_called_once()
+        self.assertIn('交易日历获取失败', self.notifier.send_daily_summary_report.call_args.args[1][0]['summary']['notice'])
 
     def test_running_task_waits_then_reports_failure_instead_of_old_assets(self):
         self.save_account(self.day)
         self.running.return_value = True
-        with patch('market_trading_bot.notification.DailyAccountService.AKShareMarket', return_value=self.market):
+        with patch('market_trading_bot.DailySummaryTask.AKShareMarket', return_value=self.market):
             with patch.object(self.stop, 'wait', return_value=False):
-                self.service.send_reports(self.day)
-        summary = self.notifier.send_daily_account_report.call_args.args[2]
+                self.service.run()
+        summary = self.notifier.send_daily_summary_report.call_args.args[1][0]['summary']
         self.assertIn('仍在运行', summary['notice'])
         self.assertNotIn('equity', summary)
         self.market.closing_prices.assert_not_called()
@@ -161,13 +166,13 @@ class DailyAccountServiceTests(unittest.TestCase):
     def test_restart_reuses_saved_close_but_sends_report_again(self):
         self.save_account(self.day)
         self.summary()
-        restarted = DailyAccountService(self.root, self.settings, self.configs, self.notifier,
-                                         self.stop, self.running, lambda: self.current)
+        restarted = DailySummaryTask(self.root, self.settings, self.configs, self.notifier, self.context,
+                                     self.stop, self.running, lambda: self.current)
         self.market.closing_prices.reset_mock()
-        with patch('market_trading_bot.notification.DailyAccountService.AKShareMarket', return_value=self.market):
-            restarted.send_reports(self.day)
+        with patch('market_trading_bot.DailySummaryTask.AKShareMarket', return_value=self.market):
+            restarted.run()
         self.market.closing_prices.assert_not_called()
-        self.notifier.send_daily_account_report.assert_called_once()
+        self.notifier.send_daily_summary_report.assert_called_once()
 
     def test_shutdown_during_price_fetch_does_not_send_report(self):
         self.save_account(self.day)
@@ -177,9 +182,9 @@ class DailyAccountServiceTests(unittest.TestCase):
             return {'510300.XSHG': Decimal('105')}
 
         self.market.closing_prices.side_effect = close
-        with patch('market_trading_bot.notification.DailyAccountService.AKShareMarket', return_value=self.market):
-            self.assertFalse(self.service.send_reports(self.day))
-        self.notifier.send_daily_account_report.assert_not_called()
+        with patch('market_trading_bot.DailySummaryTask.AKShareMarket', return_value=self.market):
+            self.assertFalse(self.service.run())
+        self.notifier.send_daily_summary_report.assert_not_called()
 
     def test_future_ledger_state_does_not_change_previous_close(self):
         self.save_account(date(2026, 11, 19), cash='90000', quantity=100)
@@ -187,3 +192,16 @@ class DailyAccountServiceTests(unittest.TestCase):
         previous = PapAccountRepository.get_account_snapshot_on_or_before(self.root / 'data', 'pap', '2026-11-19')
         self.assertEqual(previous['cash'], '90000')
         self.assertEqual(previous['positions']['510300.XSHG']['quantity'], 100)
+
+    def test_all_strategies_are_sent_in_one_report_and_task_owns_no_calendar_calls(self):
+        self.save_account(self.day)
+        self.configs['second_strategy'] = {'instances': [{'id': 'second', 'enabled': True, 'mode': 'pap'}]}
+        with patch('market_trading_bot.DailySummaryTask.AKShareMarket', return_value=self.market):
+            self.service.start()
+            self.service.thread.join(timeout=3)
+        self.assertFalse(self.service.thread.is_alive())
+        self.assertTrue(self.service.completed)
+        self.notifier.send_daily_summary_report.assert_called_once()
+        accounts = self.notifier.send_daily_summary_report.call_args.args[1]
+        self.assertEqual({entry['strategy_id'] for entry in accounts}, {'etf_rotation', 'second_strategy'})
+        self.market.trading_calendar.assert_not_called()

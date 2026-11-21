@@ -8,7 +8,7 @@ from market_trading_bot.market.AKShareMarket import SHANGHAI
 from market_trading_bot.TradingScheduler import TradingScheduler
 from market_trading_bot.TradingTask import TradingTask
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1] / 'dev'
 DUE = datetime(2026, 11, 20, 14, 30, tzinfo=SHANGHAI)
@@ -30,7 +30,7 @@ class TradingSchedulerTests(unittest.TestCase):
         self.clock = patch.object(TradingScheduler, 'now', side_effect=lambda: self.current)
         self.clock.start()
         self.calendar_patch = patch('market_trading_bot.TradingScheduler.AKShareMarket.trading_calendar',
-                                    return_value=[date(2026, 11, 20), date(2026, 11, 24)])
+                                    return_value=[date(2026, 11, 19), date(2026, 11, 20), date(2026, 11, 24)])
         self.calendar = self.calendar_patch.start()
         self.scheduler = TradingScheduler(self.root)
         self.scheduler.start()
@@ -75,7 +75,7 @@ class TradingSchedulerTests(unittest.TestCase):
         self.assertEqual(self.scheduler.tasks, {})
 
     def test_calendar_failure_waits_five_seconds_then_registers_jobs(self):
-        self.calendar.side_effect = [ValueError('网络失败'), [date(2026, 11, 20), date(2026, 11, 24)]]
+        self.calendar.side_effect = [ValueError('网络失败'), [date(2026, 11, 19), date(2026, 11, 20), date(2026, 11, 24)]]
         with patch.object(self.scheduler.stop_event, 'wait', return_value=False) as wait:
             self.prepare()
         wait.assert_called_once_with(5)
@@ -83,7 +83,7 @@ class TradingSchedulerTests(unittest.TestCase):
         self.assertIn('etf_rotation', self.scheduler.jobs)
 
     def test_late_calendar_recovery_does_not_run_past_strategy_time(self):
-        self.calendar.side_effect = [ValueError('网络失败'), [date(2026, 11, 20), date(2026, 11, 24)]]
+        self.calendar.side_effect = [ValueError('网络失败'), [date(2026, 11, 19), date(2026, 11, 20), date(2026, 11, 24)]]
 
         def wait(seconds):
             self.current = DUE + timedelta(seconds=1)
@@ -252,21 +252,46 @@ class TradingSchedulerTests(unittest.TestCase):
         self.assertEqual(trigger.get_next_fire_time(None, self.current), due)
         self.assertEqual(trigger.get_next_fire_time(due, due + timedelta(seconds=1)), due + timedelta(days=1))
 
-    def test_daily_report_runs_once_per_day_and_releases_guard(self):
+    def test_daily_task_is_started_once_per_day_and_shares_calendar(self):
+        self.prepare()
         self.current = DUE.replace(hour=15, minute=5)
-        with patch.object(self.scheduler.daily_reports, 'send_reports', return_value=True) as send:
-            self.scheduler.send_daily_reports()
-            self.scheduler.send_daily_reports()
-            send.assert_called_once_with(self.current.date())
+        with patch('market_trading_bot.TradingScheduler.DailySummaryTask') as task_class:
+            task_class.return_value.thread.is_alive.return_value = False
+            self.scheduler._start_daily_summary_task()
+            self.scheduler._start_daily_summary_task()
+            task_class.assert_called_once()
+            task_class.return_value.start.assert_called_once()
+            self.assertEqual(task_class.call_args.args[4]['previous_trading_day'], date(2026, 11, 19))
+            self.calendar.assert_called_once()
             self.current += timedelta(days=1)
-            self.scheduler.send_daily_reports()
-        self.assertEqual(send.call_count, 2)
+            self.scheduler._start_daily_summary_task()
+            self.assertEqual(task_class.call_count, 2)
+            self.assertFalse(task_class.call_args.args[4]['is_trading_day'])
 
-    def test_stopped_daily_run_is_not_marked_complete(self):
+    def test_stop_prevents_starting_daily_task(self):
         self.current = DUE.replace(hour=15, minute=5)
-        with patch.object(self.scheduler.daily_reports, 'send_reports', return_value=False):
-            self.scheduler.send_daily_reports()
+        self.scheduler.stop_event.set()
+        with patch('market_trading_bot.TradingScheduler.DailySummaryTask') as task_class:
+            self.scheduler._start_daily_summary_task()
+        task_class.assert_not_called()
         self.assertIsNone(self.scheduler.reported_day)
+
+    def test_daily_calendar_failure_is_retried_by_scheduler_then_passed_to_task(self):
+        self.current = DUE.replace(hour=15, minute=5)
+        self.calendar.side_effect = ValueError('offline')
+        with patch.object(self.scheduler.stop_event, 'wait', return_value=False) as wait:
+            with patch('market_trading_bot.TradingScheduler.DailySummaryTask') as task_class:
+                self.scheduler._start_daily_summary_task()
+        self.assertEqual(self.calendar.call_count, 3)
+        self.assertEqual(wait.call_count, 2)
+        self.assertIn('交易日历获取失败', task_class.call_args.args[4]['notice'])
+
+    def test_stop_joins_daily_task(self):
+        task = Mock()
+        self.scheduler.daily_summary_task = task
+        self.scheduler.stop()
+        task.stop.assert_called_once()
+        self.scheduler.daily_summary_task = None
 
     def test_start_after_fifteen_oh_five_schedules_same_day_report(self):
         self.scheduler.stop()
