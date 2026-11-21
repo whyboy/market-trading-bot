@@ -78,7 +78,7 @@ backend/.venv/bin/python backend/main.py
 | `storage.data_dir` | SQLite 账本与 CSV 目录 |
 | `logging` | 日志目录、级别和保留日期数 |
 | `runtime.trade_timeout_seconds` | 交易执行超时阈值，默认 300 秒，仅标记异常 |
-| `pushplus.enabled` | 是否启用执行报告推送，默认关闭；Token 配置在 `pushplus.token` |
+| `pushplus.enabled` | 是否启用执行报告推送；Token 配置在 `pushplus.token` |
 
 策略配置位于 `backend/dev/market_trading_bot/config/etf_rotation_strategy.json`：
 
@@ -97,7 +97,7 @@ backend/.venv/bin/python backend/main.py
 | `schedule.trade_time` | `14:30` | 北京时间自动调仓时间 |
 | `schedule.report_time` | `15:15` | 收盘日报时间，当前尚未实现 |
 
-`initial_cash` 仅在首次开户时使用并保存到账本；后续修改配置不会改变账户基准。PushPlus Token 等凭据不要提交到仓库。
+`initial_cash` 仅在首次开户时使用并保存到账本；后续修改配置不会改变账户基准。PushPlus Token 配置在 `global.json` 的 `pushplus.token` 中。
 
 ## 账户数据
 
@@ -211,7 +211,7 @@ Azure 网络安全组放行 TCP `8080` 后，访问 `http://<服务器公网IP>:
 
 1. 在 [PushPlus](https://www.pushplus.plus/push1.html) 登录、关注微信服务号并完成实名认证。
 2. 创建专用消息 Token，在网页“试一试”中选择微信渠道，确认能收到消息。
-3. 在 `backend/dev/market_trading_bot/config/global.json` 中设置 `pushplus.enabled=true`，并填写 `pushplus.token`。真实 Token 仅保存在部署机器，不提交到仓库。
+3. 在 `backend/dev/market_trading_bot/config/global.json` 中设置 `pushplus.enabled=true`，并填写 `pushplus.token`。Token 随配置文件保存。
 4. 首次部署执行 `docker compose up -d --build`；后续修改配置执行 `docker compose restart trading` 生效。
 
 每个账户在策略执行结束后发送一份模拟交易报告，无成交也发送；包括成交、持仓、执行时资产及累计收益，失败则提示查看日志。

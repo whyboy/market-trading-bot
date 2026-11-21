@@ -11,8 +11,8 @@
     "data_dir": "data"
   },
   "pushplus": {
-    "enabled": false,
-    "token": ""
+    "enabled": true,
+    "token": "bd36edb036a143d6a2d77127b156b86e"
   },
   "logging": {
     "directory": "logs",
