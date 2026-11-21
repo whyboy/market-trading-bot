@@ -1,7 +1,8 @@
 """15:10只读每日结果，汇总所有策略和账户发送一份日报。"""
 import logging
 import threading
-from market_trading_bot.service.AccountLedger import AccountLedger
+from market_trading_bot.service.AccountService import AccountService
+from market_trading_bot.service.DailyResultsService import DailyResultsService
 
 
 class DailySummaryTask:
@@ -59,15 +60,15 @@ class DailySummaryTask:
         day = self.context['day']
         if self.context.get('notice'):
             return {'notice': self.context['notice']}
-        account = AccountLedger.get_snapshot(self.directory, instance_id, day.isoformat())
+        account = AccountService.get_snapshot(self.directory, instance_id, day.isoformat())
         if not account['initialized']:
             return {'notice': '账户尚未开户，暂无持仓和收益数据。'}
         if not self.context['is_trading_day']:
-            snapshot = AccountLedger.get_valuation(self.directory, instance_id, day.isoformat())
+            snapshot = DailyResultsService.get_valuation(self.directory, instance_id, day.isoformat())
             if snapshot is None:
                 return {'notice': '今日休市，暂无有效收盘估值。'}
             return {**snapshot, 'is_trading_day': False}
-        result = AccountLedger.get_daily_result(self.directory, instance_id, day.isoformat())
+        result = DailyResultsService.get_daily_result(self.directory, instance_id, day.isoformat())
         if result is None or result['valuation_status'] == 'pending':
             return {'notice': '当天收盘估值尚未执行或尚未完成，暂无当天收益。'}
         if result['valuation_status'] == 'running':

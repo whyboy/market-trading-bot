@@ -35,7 +35,9 @@ market-trading-bot/
 │   │       ├── repository/                # 数据库访问
 │   │       │   ├── AccountRepository.py
 │   │       │   └── DailyResultsRepository.py
-│   │       ├── service/AccountLedger.py  # 账户事务与账本服务
+│   │       ├── service/                  # 账户与每日结果服务
+│   │       │   ├── AccountService.py
+│   │       │   └── DailyResultsService.py
 │   │       ├── log/StrategyLogger.py      # 日志处理代码
 │   │       ├── market/                    # 行情适配及数据
 │   │       │   ├── AKShareMarket.py
@@ -151,8 +153,10 @@ backend/.venv/bin/python backend/main.py
 TaskScheduler → TradingTask（绑定策略＋账户）
                     ├── Market → MarketData → Strategy → StrategyData
                     ├── PapTrader：纯内存模拟调仓
-                    └── AccountLedger：账户事务与CSV导出，调用账户及每日结果 Repository
+                    └── AccountService：账户事务与CSV导出，调用账户及每日结果 Repository
 ```
+
+每日估值和日报通过 DailyResultsService 访问每日结果。
 
 Repository 不依赖执行器。Task 在账户事务内读取最新快照、检查当日结果、调用执行器并保存；任一步失败整体回滚，保证并发防重复与资金一致性。
 网页选择账户后读取对应任务状态；未指定账户查询时汇总整个策略，任一运行账户超时都会显示异常。

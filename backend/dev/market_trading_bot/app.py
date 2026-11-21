@@ -7,7 +7,7 @@ from datetime import date
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from market_trading_bot.service.AccountLedger import AccountLedger
+from market_trading_bot.service.AccountService import AccountService
 from market_trading_bot.TaskScheduler import TaskScheduler
 from pathlib import Path
 
@@ -60,7 +60,7 @@ def account(instance_id: str):
         raise HTTPException(404, '账户不存在')
     if not any(instance['id'] == instance_id for item in load_strategies() for instance in item.get('instances', [])):
         raise HTTPException(404, '账户不存在')
-    return AccountLedger.get_latest_account(ROOT / load_settings()['storage']['data_dir'], instance_id)
+    return AccountService.get_latest_account(ROOT / load_settings()['storage']['data_dir'], instance_id)
 
 
 @app.get('/api/strategies/{strategy_id}/logs')

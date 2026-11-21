@@ -8,7 +8,7 @@ from datetime import datetime, time, timezone
 from market_trading_bot.log.StrategyLogger import strategy_logging
 from market_trading_bot.market.AKShareMarket import AKShareMarket, SHANGHAI
 from market_trading_bot.notification.PushPlusNotifier import PushPlusNotifier
-from market_trading_bot.service.AccountLedger import AccountLedger
+from market_trading_bot.service.AccountService import AccountService
 from market_trading_bot.strategy.ETFRotationStrategyImpl import ETFRotationStrategyImpl
 from market_trading_bot.task.DailySummaryTask import DailySummaryTask
 from market_trading_bot.task.DailyValuationTask import DailyValuationTask
@@ -251,7 +251,7 @@ class TaskScheduler:
             strategy=ETFRotationStrategyImpl(config['parameters']),
             market=AKShareMarket(self.settings['market'], test_mode=self.test_mode),
             executor=PapTrader(instance['execution'], config['instruments']),
-            account_store=AccountLedger(data_dir, instance['id'], strategy_id),
+            account_store=AccountService(data_dir, instance['id'], strategy_id),
             strategy_id=strategy_id, instance_id=instance['id'], initial_cash=instance['initial_cash'],
             scheduled_at=scheduled_at, notifier=self.notifier,
             trade_timeout_seconds=self.settings.get('runtime', {}).get('trade_timeout_seconds', 300),

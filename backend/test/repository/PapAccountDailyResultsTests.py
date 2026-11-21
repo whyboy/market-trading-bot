@@ -2,7 +2,8 @@
 import sqlite3
 import tempfile
 import unittest
-from market_trading_bot.service.AccountLedger import AccountLedger
+from market_trading_bot.service.AccountService import AccountService
+from market_trading_bot.service.DailyResultsService import DailyResultsService
 from pathlib import Path
 
 
@@ -14,31 +15,31 @@ class PapAccountDailyResultsTests(unittest.TestCase):
         self.execution = {'date': '2026-11-20', 'cash': '100000', 'equity': '100000', 'positions': {}, 'fills': []}
 
     def test_valuation_only_row_does_not_prevent_actual_execution(self):
-        repository = AccountLedger(self.root, 'pap', 'rotation')
-        repository.save_valuation({'date': '2026-11-20', 'equity': '100500'})
+        repository = AccountService(self.root, 'pap', 'rotation')
+        DailyResultsService(self.root, 'pap').save_valuation({'date': '2026-11-20', 'equity': '100500'})
         self.assertIsNone(repository.get_execution('2026-11-20'))
         with repository.transaction('2026-11-20', 100000) as transaction:
             self.assertIsNone(transaction.completed)
             transaction.save_execution(self.execution)
-        result = repository.get_daily_result(self.root, 'pap', '2026-11-20')
+        result = DailyResultsService.get_daily_result(self.root, 'pap', '2026-11-20')
         self.assertEqual(result['execution'], self.execution)
         self.assertEqual(result['valuation_status'], 'pending')
         self.assertIsNone(result['valuation'])
 
     def test_valuation_updates_keep_execution_and_do_not_create_extra_rows(self):
-        repository = AccountLedger(self.root, 'pap', 'rotation')
+        repository = AccountService(self.root, 'pap', 'rotation')
         with repository.transaction('2026-11-20', 100000) as transaction:
             transaction.save_execution(self.execution)
-        repository.save_valuation({'date': '2026-11-20', 'equity': '100500'})
-        repository.save_valuation({'date': '2026-11-20', 'equity': '100800'})
-        result = repository.get_daily_result(self.root, 'pap', '2026-11-20')
+        DailyResultsService(self.root, 'pap').save_valuation({'date': '2026-11-20', 'equity': '100500'})
+        DailyResultsService(self.root, 'pap').save_valuation({'date': '2026-11-20', 'equity': '100800'})
+        result = DailyResultsService.get_daily_result(self.root, 'pap', '2026-11-20')
         self.assertEqual(result['execution'], self.execution)
         self.assertEqual(result['valuation']['equity'], '100800')
         with sqlite3.connect(repository.database) as connection:
             self.assertEqual(connection.execute('SELECT COUNT(*) FROM daily_results').fetchone()[0], 1)
 
     def test_duplicate_execution_cannot_overwrite_committed_trade(self):
-        repository = AccountLedger(self.root, 'pap', 'rotation')
+        repository = AccountService(self.root, 'pap', 'rotation')
         with repository.transaction('2026-11-20', 100000) as transaction:
             transaction.save_execution(self.execution)
             with self.assertRaises(ValueError):

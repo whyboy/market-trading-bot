@@ -12,7 +12,7 @@ from market_trading_bot.repository.DailyResultsRepository import DailyResultsRep
 from pathlib import Path
 
 
-class AccountLedger:
+class AccountService:
     """按账户保存基础信息、每日交易与收盘估值，同日交易唯一约束防止重复成交。"""
 
     def __init__(self, directory: Path, instance_id: str, strategy_id: str = ''):
@@ -38,7 +38,7 @@ class AccountLedger:
     @staticmethod
     def get_latest_account(directory: Path, instance_id: str) -> dict:
         """只读查询最近交易资产；未开户返回 initialized=False。"""
-        snapshot = AccountLedger.get_snapshot(directory, instance_id, '9999-12-31')
+        snapshot = AccountService.get_snapshot(directory, instance_id, '9999-12-31')
         if not snapshot['initialized']:
             return snapshot
         return {'initialized': True, 'date': snapshot['date'],
@@ -65,7 +65,7 @@ class AccountLedger:
                 initial_cash = initial_row[0]
             else:
                 first = json.loads(DailyResultsRepository.first_execution(connection).fetchone()[0])
-                initial_cash = str(AccountLedger._infer_initial_cash(first))
+                initial_cash = str(AccountService._infer_initial_cash(first))
         return {**snapshot, 'initialized': True, 'initial_cash': initial_cash}
 
     def get_execution(self, day: str) -> dict | None:
@@ -180,51 +180,6 @@ class AccountLedger:
             amount, fee = Decimal(fill['amount']), Decimal(fill['commission'])
             initial_cash += amount + fee if fill['side'] == 'buy' else fee - amount
         return initial_cash
-
-    @staticmethod
-    def get_valuation(directory, instance_id, day):
-        """只读查询 day 当天及之前的最近成功估值；无记录返回 None。"""
-        if not re.fullmatch(r'[A-Za-z0-9_-]+', instance_id):
-            raise ValueError('实例ID只能包含字母、数字、下划线及连字符')
-        database = directory / instance_id / 'ledger.sqlite3'
-        if not database.exists():
-            return None
-        with closing(sqlite3.connect(f'{database.resolve().as_uri()}?mode=ro', uri=True)) as connection:
-            if not DailyResultsRepository.table_exists(connection).fetchone():
-                return None
-            row = DailyResultsRepository.latest_valuation(connection, (day,)).fetchone()
-        return json.loads(row[0]) if row else None
-
-    def save_valuation(self, snapshot):
-        """保存收盘估值并标记 success，保留交易结果。"""
-        payload = json.dumps(snapshot, ensure_ascii=False, allow_nan=False)
-        with closing(sqlite3.connect(self.database, timeout=30)) as connection, connection:
-            DailyResultsRepository.save_valuation(connection, (snapshot['date'], payload, datetime.now(timezone.utc).isoformat()))
-        return snapshot
-
-    def set_valuation_status(self, day, status, error=''):
-        """更新估值状态和错误，保留交易及估值数据。"""
-        with closing(sqlite3.connect(self.database, timeout=30)) as connection, connection:
-            DailyResultsRepository.set_valuation_status(connection, (day, status, error, datetime.now(timezone.utc).isoformat()))
-
-    @staticmethod
-    def get_daily_result(directory, instance_id, day):
-        """只读查询 day 当天的交易、估值和状态；无记录返回 None。"""
-        if not re.fullmatch(r'[A-Za-z0-9_-]+', instance_id):
-            raise ValueError('实例ID只能包含字母、数字、下划线及连字符')
-        database = directory / instance_id / 'ledger.sqlite3'
-        if not database.exists():
-            return None
-        with closing(sqlite3.connect(f'{database.resolve().as_uri()}?mode=ro', uri=True)) as connection:
-            if not DailyResultsRepository.table_exists(connection).fetchone():
-                return None
-            connection.row_factory = sqlite3.Row
-            row = DailyResultsRepository.result_for_day(connection, (day,)).fetchone()
-        if row is None:
-            return None
-        return {'date': row['day'], 'execution': json.loads(row['execution_payload']) if row['execution_payload'] else None,
-                'valuation': json.loads(row['valuation_payload']) if row['valuation_payload'] else None,
-                'valuation_status': row['valuation_status'], 'valuation_error': row['valuation_error']}
 
     def _insert_account(self, connection, initial_cash):
         """写入开户资金、账户归属和 UTC 开户时间。"""

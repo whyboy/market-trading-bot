@@ -1,4 +1,4 @@
-"""纯内存模拟调仓；账户持久化由 AccountLedger 负责。"""
+"""纯内存模拟调仓；账户持久化由 AccountService 负责。"""
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP
 from market_trading_bot.strategy.StrategyData import StrategyData
 
