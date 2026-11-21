@@ -45,7 +45,6 @@ market-trading-bot/
 │   │       │   ├── MarketData.py            # MarketData、DailyClose
 │   │       │   ├── MarketProvider.py
 │   │       │   └── source/                  # 各行情数据源
-│   │       │       ├── AKShareMarket.py
 │   │       │       ├── BaoStockDaily.py
 │   │       │       └── HttpMarket.py
 │   │       ├── trading/TradeExecutor.py
