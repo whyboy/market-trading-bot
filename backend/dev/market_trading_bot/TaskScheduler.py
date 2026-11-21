@@ -65,12 +65,6 @@ class TaskScheduler:
                 if config.get('enable', True):
                     strategy_id = config['strategy']
                     self.configs[strategy_id] = config
-            # 每天北京时间 15:05 更新收盘估值。
-            self.timer.add_job(self._start_valuation, 'cron', hour=15, minute=5, id='_daily_valuation',
-                               coalesce=True, max_instances=1, misfire_grace_time=None)
-            # 每天北京时间 15:10 汇总并推送日报。
-            self.timer.add_job(self._start_summary, 'cron', hour=15, minute=10, id='_daily_report',
-                               coalesce=True, max_instances=1, misfire_grace_time=None)
             # 每天北京时间 9:00 确认交易日并安排交易。
             self.timer.add_job(self.prepare_day, 'cron', hour=9, minute=0, id='_calendar',
                                coalesce=True, max_instances=1, misfire_grace_time=300)
@@ -79,60 +73,85 @@ class TaskScheduler:
             self.timer.start()
             if self.now().time() >= time(9):
                 self.timer.add_job(self.prepare_day, id='_startup_calendar')
-            if self.now().time() >= time(15, 5):
-                self.timer.add_job(self._recover_daily, id='_startup_daily_tasks')
         except BaseException:
             self.stop()
             raise
 
     def prepare_day(self):
-        """确认交易日并安排当天尚未到点的交易；失败每 5 秒重试至 15:00。"""
+        """获取当天交易日历，交易日注册任务；休市日仅记录状态。"""
         if not self.configs or not self.calendar_lock.acquire(blocking=False):
             return
-        day = self.now().date()
         try:
+            day = self.now().date()
             if self.prepared_day == day:
                 return
-            market = AKShareMarket(self.settings['market'])
-            while not self.stop_event.is_set() and self.now().date() == day and self.now().time() < time(15):
-                try:
-                    context = self._load_calendar(day, market)
-                    if self.stop_event.is_set() or self.now().date() != day:
-                        return
-                    self.prepared_day = day
-                    self.calendar_day = day
-                    self.is_trading_day = context['is_trading_day']
-                    if self.is_trading_day:
-                        for strategy_id, config in self.configs.items():
-                            due = datetime.combine(day, time.fromisoformat(config['schedule']['trade_time']), SHANGHAI)
-                            if due > self.now():
-                                self.timer.add_job(
-                                    self._start_trades, 'date', run_date=due, args=[strategy_id, day],
-                                    id=strategy_id, replace_existing=True, misfire_grace_time=5)
-                    return
-                except Exception as exc:
-                    self.calendar_error = str(exc)
-                    logging.getLogger(__name__).warning('交易日历加载失败，5秒后重试：%s', exc)
-                    if self.stop_event.wait(5):
-                        return
+            context = self._prepare_calendar(day)
+            if context is None or self.stop_event.is_set() or self.now().date() != day:
+                return
+            self.calendar_day = day
+            self.is_trading_day = context['is_trading_day']
+            if not self.is_trading_day:
+                self.prepared_day = day
+                logging.getLogger(__name__).info('%s 非交易日，不注册交易及每日任务', day)
+                return
+            self._register_daily_tasks(day)
+            self.prepared_day = day
         finally:
             self.calendar_lock.release()
 
-    def _recover_daily(self):
+    def _prepare_calendar(self, day):
+        """获取交易日历；盘中每 5 秒重试，收盘后最多尝试 3 次。"""
+        market = AKShareMarket(self.settings['market'])
+        attempts = 0
+        started_after_close = self.now().time() >= time(15)
+        while not self.stop_event.is_set() and self.now().date() == day:
+            try:
+                return self._load_calendar(day, market)
+            except Exception as exc:
+                attempts += 1
+                self.calendar_error = str(exc)
+                logging.getLogger(__name__).warning('交易日历加载失败：%s', exc)
+                if (started_after_close and attempts >= 3) or self.stop_event.wait(5):
+                    return None
+                if not started_after_close and self.now().time() >= time(15):
+                    return None
+        return None
+
+    def _register_daily_tasks(self, day):
+        """注册当天尚未到点的交易、估值和日报；晚启动补执行每日任务。"""
+        now = self.now()
+        for strategy_id, config in self.configs.items():
+            due = datetime.combine(day, time.fromisoformat(config['schedule']['trade_time']), SHANGHAI)
+            if due > now:
+                self.timer.add_job(self._start_trades, 'date', run_date=due, args=[strategy_id, day],
+                                   id=strategy_id, replace_existing=True, misfire_grace_time=5)
+        for task_id, task, at in (('_daily_valuation', self._start_valuation, time(15, 5)),
+                                  ('_daily_report', self._start_summary, time(15, 10))):
+            due = datetime.combine(day, at, SHANGHAI)
+            if due > now:
+                self.timer.add_job(task, 'date', run_date=due, args=[day], id=task_id,
+                                   replace_existing=True, misfire_grace_time=None)
+        if now.time() >= time(15, 5):
+            self.timer.add_job(self._recover_daily, args=[day], id='_startup_daily_tasks', replace_existing=True)
+
+    def _recover_daily(self, scheduled_day=None):
         """晚启动先补估值；已过15:10时等待补估值结束再发送当天日报。"""
+        if scheduled_day is not None and scheduled_day != self.now().date():
+            return
         self._start_valuation()
         if self.now().time() >= time(15, 10):
             if self.valuation_task is not None:
                 self.valuation_task.thread.join()
             self._start_summary()
 
-    def _start_valuation(self):
+    def _start_valuation(self, scheduled_day=None):
         """每天启动一次收盘估值，前一天任务未结束时不重叠执行。"""
         if not self.valuation_lock.acquire(blocking=False):
             return
         try:
             day = self.now().date()
-            if self.stop_event.is_set() or self.now().time() < time(15, 5) or self.valuation_day == day:
+            if (self.stop_event.is_set() or (scheduled_day is not None and scheduled_day != day)
+                    or self.now().time() < time(15, 5) or self.valuation_day == day):
                 return
             if self.valuation_task is not None and self.valuation_task.thread.is_alive():
                 return
@@ -147,13 +166,14 @@ class TaskScheduler:
         finally:
             self.valuation_lock.release()
 
-    def _start_summary(self):
+    def _start_summary(self, scheduled_day=None):
         """每天启动一次日报，前一天任务未结束时不重叠执行。"""
         if not self.summary_lock.acquire(blocking=False):
             return
         try:
             day = self.now().date()
-            if self.stop_event.is_set() or self.now().time() < time(15, 10) or self.reported_day == day:
+            if (self.stop_event.is_set() or (scheduled_day is not None and scheduled_day != day)
+                    or self.now().time() < time(15, 10) or self.reported_day == day):
                 return
             if self.summary_task is not None and self.summary_task.thread.is_alive():
                 return

@@ -66,8 +66,12 @@ class TaskSchedulerTests(unittest.TestCase):
 
     def test_holiday_creates_no_jobs_or_tasks(self):
         self.current = DUE.replace(day=23, hour=9)
-        self.scheduler.prepare_day()
+        with self.assertLogs('market_trading_bot.TaskScheduler', level='INFO') as logs:
+            self.scheduler.prepare_day()
+        self.assertIn('非交易日', logs.output[0])
         self.assertFalse(self.scheduler.is_trading_day)
+        self.assertIsNone(self.scheduler.timer.get_job('_daily_valuation'))
+        self.assertIsNone(self.scheduler.timer.get_job('_daily_report'))
         self.assertIsNone(self.scheduler.timer.get_job('etf_rotation'))
         with patch('market_trading_bot.task.TradingTask.TradingTask.trade') as trade:
             self.scheduler._start_trades('etf_rotation', self.current.date())
@@ -260,13 +264,21 @@ class TaskSchedulerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.scheduler._build_trade_task('etf_rotation', {**self.config['instances'][0], 'mode': 'pro'}, DUE)
 
-    def test_valuation_and_summary_have_separate_daily_triggers(self):
-        trigger = self.scheduler.timer.get_job('_daily_report').trigger
-        due = DUE.replace(hour=15, minute=10)
-        valuation = self.scheduler.timer.get_job('_daily_valuation').trigger
-        self.assertEqual(valuation.get_next_fire_time(None, self.current), due.replace(minute=5))
-        self.assertEqual(trigger.get_next_fire_time(None, self.current), due)
-        self.assertEqual(trigger.get_next_fire_time(due, due + timedelta(seconds=1)), due + timedelta(days=1))
+    def test_valuation_and_summary_registered_only_after_trading_day_check(self):
+        self.assertIsNone(self.scheduler.timer.get_job('_daily_valuation'))
+        self.assertIsNone(self.scheduler.timer.get_job('_daily_report'))
+        self.prepare()
+        valuation = self.scheduler.timer.get_job('_daily_valuation')
+        summary = self.scheduler.timer.get_job('_daily_report')
+        self.assertEqual(valuation.next_run_time, DUE.replace(hour=15, minute=5))
+        self.assertEqual(summary.next_run_time, DUE.replace(hour=15, minute=10))
+
+    def test_late_trading_day_registers_recovery(self):
+        self.current = DUE.replace(hour=16)
+        with patch.object(self.scheduler.timer, 'add_job') as add_job:
+            self.scheduler.prepare_day()
+        self.assertEqual([call.kwargs['id'] for call in add_job.call_args_list], ['_startup_daily_tasks'])
+        self.assertTrue(self.scheduler.is_trading_day)
 
     def test_daily_task_is_started_once_per_day_and_shares_calendar(self):
         self.prepare()
