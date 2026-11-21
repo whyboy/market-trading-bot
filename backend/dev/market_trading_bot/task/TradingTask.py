@@ -91,7 +91,7 @@ class TradingTask:
                                  self.instance_id, rank, item.symbol, item.score, signal.target_weights[item.symbol])
             self.logger.info('策略计算完成 instance=%s target_weights=%s', self.instance_id, signal.target_weights)
             committed = self._rebalance(signal)
-        output = {'operation': 'trade_executor_rebalance', 'instance_id': self.instance_id, **committed}
+        output = {'operation': 'pap_rebalance', 'instance_id': self.instance_id, **committed}
         try:
             self.account_store.export_trades()
             output['csv_exported'] = True
