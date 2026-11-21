@@ -20,7 +20,7 @@ class TradingTask:
         self.strategy_path = strategy_path
         self.config = json.loads(strategy_path.read_text())
         self.strategy_id = self.config['strategy']
-        self.settings = json.loads((root / 'config/global.json').read_text())
+        self.settings = json.loads((root / 'market_trading_bot/config/global.json').read_text())
         self.status_repository = TaskStatusRepository(root, self.strategy_id)
         self.stop_event = threading.Event()
         self.thread = threading.Thread(target=self._run, name=f'trading-task-{self.strategy_id}', daemon=True)

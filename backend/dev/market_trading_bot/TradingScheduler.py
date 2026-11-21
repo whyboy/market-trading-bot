@@ -29,7 +29,7 @@ class TradingScheduler:
         self.heartbeat_at = self.started_at
 
     def start(self):
-        self.settings = json.loads((self.root / 'config/global.json').read_text())
+        self.settings = json.loads((self.root / 'market_trading_bot/config/global.json').read_text())
         directory = self.root / self.settings['storage']['data_dir'] / 'runtime'
         directory.mkdir(parents=True, exist_ok=True)
         self.lock_file = (directory / 'scheduler.lock').open('a')
@@ -40,7 +40,7 @@ class TradingScheduler:
             self.lock_file = None
             raise RuntimeError('已有调度服务运行，请只启动一个后端实例') from None
         try:
-            for path in sorted((self.root / 'config').glob('*_strategy.json')):
+            for path in sorted((self.root / 'market_trading_bot/config').glob('*_strategy.json')):
                 config = json.loads(path.read_text())
                 if config.get('enable', True):
                     strategy_id = config['strategy']

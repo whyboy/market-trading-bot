@@ -139,13 +139,13 @@ class PapAccountRepositoryTests(PapFixture, unittest.TestCase):
         self.assertEqual(len(self.read_trades()), 2)
 
     def test_task_retries_without_market_and_recovers_csv(self):
-        (self.root / 'config').mkdir()
+        (self.root / 'market_trading_bot/config').mkdir(parents=True)
         global_config = {'timezone': 'Asia/Shanghai', 'market': {}, 'storage': {'data_dir': 'data'}, 'logging': {}}
         config = {'strategy': 'etf_rotation', 'instances': [{'id': 'pap', 'enabled': True, 'mode': 'pap',
                   'initial_cash': 10000, 'execution': {'commission_rate': .0002, 'minimum_commission': 5, 'slippage_rate': 0}}],
                   'parameters': {}, 'instruments': self.rules}
-        (self.root / 'config/global.json').write_text(json.dumps(global_config))
-        path = self.root / 'config/strategy.json'
+        (self.root / 'market_trading_bot/config/global.json').write_text(json.dumps(global_config))
+        path = self.root / 'market_trading_bot/config/strategy.json'
         path.write_text(json.dumps(config))
         with patch('market_trading_bot.task.TradingTask.strategy_logging'), \
                 patch('market_trading_bot.task.TradingTask.datetime') as clock, \

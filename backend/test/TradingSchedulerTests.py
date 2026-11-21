@@ -18,10 +18,10 @@ class TradingSchedulerTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
-        (self.root / 'config').mkdir()
-        (self.root / 'config/global.json').write_text((ROOT / 'config/global.json').read_text())
-        self.path = self.root / 'config/etf_rotation_strategy.json'
-        self.config = json.loads((ROOT / 'config/etf_rotation_strategy.json').read_text())
+        (self.root / 'market_trading_bot/config').mkdir(parents=True)
+        (self.root / 'market_trading_bot/config/global.json').write_text((ROOT / 'market_trading_bot/config/global.json').read_text())
+        self.path = self.root / 'market_trading_bot/config/etf_rotation_strategy.json'
+        self.config = json.loads((ROOT / 'market_trading_bot/config/etf_rotation_strategy.json').read_text())
         self.path.write_text(json.dumps(self.config))
         self.current = DUE.replace(hour=8, minute=0)
         self.clock = patch.object(TradingScheduler, 'now', side_effect=lambda: self.current)
@@ -178,8 +178,8 @@ class TradingSchedulerTests(unittest.TestCase):
     def test_multiple_strategies_share_one_calendar_check(self):
         self.scheduler.stop()
         config = {**self.config, 'strategy': 'second'}
-        (self.root / 'config/second_strategy.json').write_text(json.dumps(config))
-        (self.root / 'config/disabled_strategy.json').write_text(json.dumps({**config, 'strategy': 'disabled', 'enable': False}))
+        (self.root / 'market_trading_bot/config/second_strategy.json').write_text(json.dumps(config))
+        (self.root / 'market_trading_bot/config/disabled_strategy.json').write_text(json.dumps({**config, 'strategy': 'disabled', 'enable': False}))
         scheduler = TradingScheduler(self.root)
         scheduler.start()
         scheduler.timer.pause()

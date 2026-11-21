@@ -30,11 +30,11 @@ app = FastAPI(title='交易程序监控', docs_url=None, redoc_url=None, lifespa
 
 
 def settings():
-    return json.loads((ROOT / 'config/global.json').read_text())
+    return json.loads((ROOT / 'market_trading_bot/config/global.json').read_text())
 
 
 def strategies():
-    return [json.loads(path.read_text()) for path in sorted((ROOT / 'config').glob('*_strategy.json'))]
+    return [json.loads(path.read_text()) for path in sorted((ROOT / 'market_trading_bot/config').glob('*_strategy.json'))]
 
 
 def strategy_by_id(strategy_id):

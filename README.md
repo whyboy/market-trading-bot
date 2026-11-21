@@ -21,10 +21,9 @@ market-trading-bot/
 │   ├── main.py                            # 后端启动入口，默认端口8001
 │   ├── requirements.txt
 │   ├── dev/                               # 后端源码和运行资源，生产环境同样使用
-│   │   ├── config/                        # 全局与策略配置
-│   │   ├── data/                          # 账本、任务状态、CSV
 │   │   ├── logs/                          # 运行日志，启动后生成
 │   │   └── market_trading_bot/
+│   │       ├── config/                    # 全局与策略配置
 │   │       ├── TradingScheduler.py        # 交易日判断与任务调度
 │   │       ├── model/                      # 共享数据结构，不依赖业务模块
 │   │       │   ├── MarketSnapshot.py        # MarketSnapshot、DailyClose
@@ -65,13 +64,13 @@ backend/.venv/bin/python -m pip install -r backend/requirements.txt
 backend/.venv/bin/python backend/main.py
 ```
 
-可通过 `--host`、`--port` 调整监听地址与端口。策略配置从 `backend/dev/config/*_strategy.json` 加载，修改后重启生效。
+可通过 `--host`、`--port` 调整监听地址与端口。策略配置从 `backend/dev/market_trading_bot/config/*_strategy.json` 加载，修改后重启生效。
 
-从旧版目录升级时，先停止服务，将原 `backend/data/`、`backend/logs/` 内容迁入 `backend/dev/data/`、`backend/dev/logs/`，保留账本与历史日志。配置位于 `backend/dev/config/`；这些路径不依赖启动时的工作目录。
+从旧版目录升级时，先停止服务，将原 `backend/data/`、`backend/logs/` 内容迁入 `backend/dev/data/`、`backend/dev/logs/`，保留账本与历史日志。配置位于 `backend/dev/market_trading_bot/config/`；这些路径不依赖启动时的工作目录。
 
 ## 配置
 
-全局配置位于 `backend/dev/config/global.json`：
+全局配置位于 `backend/dev/market_trading_bot/config/global.json`：
 
 | 配置 | 用途 |
 |---|---|
@@ -81,7 +80,7 @@ backend/.venv/bin/python backend/main.py
 | `runtime.trade_timeout_seconds` | 交易执行超时阈值，默认 300 秒，仅标记异常 |
 | `pushplus` | 预留配置，当前不发送推送 |
 
-策略配置位于 `backend/dev/config/etf_rotation_strategy.json`：
+策略配置位于 `backend/dev/market_trading_bot/config/etf_rotation_strategy.json`：
 
 | 配置 | 默认值 | 用途 |
 |---|---|---|
@@ -102,7 +101,7 @@ backend/.venv/bin/python backend/main.py
 
 ## 账户数据
 
-每个实例的数据保存在 `backend/dev/data/<instance_id>/`：
+`data/` 不作为预置目录提交，运行时按配置自动创建。每个实例的数据保存在 `backend/dev/data/<instance_id>/`：
 
 - `ledger.sqlite3`：权威账本，保存全部运行结果、账户状态、信号、订单和成交。
 - `account_trades.csv`：可重建的查看副本，仅记录发生实际成交的日期。

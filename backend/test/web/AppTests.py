@@ -17,10 +17,10 @@ class AppTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
-        (self.root / 'config').mkdir()
-        (self.root / 'config/global.json').write_text(json.dumps({
+        (self.root / 'market_trading_bot/config').mkdir(parents=True)
+        (self.root / 'market_trading_bot/config/global.json').write_text(json.dumps({
             'storage': {'data_dir': 'data'}, 'logging': {'directory': 'logs', 'level': 'INFO', 'retention_dates': 30}}))
-        (self.root / 'config/example_strategy.json').write_text(json.dumps({
+        (self.root / 'market_trading_bot/config/example_strategy.json').write_text(json.dumps({
             'strategy': 'example', 'schedule': {'trade_time': '14:30'}, 'instances': [{'id': 'example_pap', 'mode': 'pap', 'enabled': False}]}))
         self.patch = patch.object(web, 'ROOT', self.root)
         self.patch.start()
@@ -83,7 +83,7 @@ class AppTests(unittest.TestCase):
         self.assertFalse(scheduler.timer.running)
 
     def test_disabled_strategy_is_not_registered(self):
-        path = self.root / 'config/example_strategy.json'
+        path = self.root / 'market_trading_bot/config/example_strategy.json'
         config = json.loads(path.read_text())
         config['enable'] = False
         path.write_text(json.dumps(config))
@@ -100,7 +100,7 @@ class AppTests(unittest.TestCase):
             self.assertTrue(client.get('/api/runtime?strategy_id=example').json()['online'])
 
     def test_active_task_has_its_own_heartbeat_and_timeout(self):
-        path = self.root / 'config/example_strategy.json'
+        path = self.root / 'market_trading_bot/config/example_strategy.json'
         config = json.loads(path.read_text())
         config['instances'][0]['enabled'] = True
         path.write_text(json.dumps(config))
@@ -140,11 +140,11 @@ class AppTests(unittest.TestCase):
                 self.assertTrue(result['online'])
 
     def test_one_strategy_does_not_block_another(self):
-        first = self.root / 'config/example_strategy.json'
+        first = self.root / 'market_trading_bot/config/example_strategy.json'
         config = json.loads(first.read_text())
         config['instances'][0]['enabled'] = True
         first.write_text(json.dumps(config))
-        second = self.root / 'config/second_strategy.json'
+        second = self.root / 'market_trading_bot/config/second_strategy.json'
         second.write_text(json.dumps({'strategy': 'second', 'schedule': {'trade_time': '14:30'},
                                      'instances': [{'id': 'second_pap', 'enabled': True}]}))
         entered = threading.Event()

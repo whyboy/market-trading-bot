@@ -17,9 +17,9 @@ NOW = datetime(2026, 11, 20, 14, 30, tzinfo=ZoneInfo('Asia/Shanghai'))
 
 class MarketFixture:
     def setUp(self):
-        self.settings = json.loads((ROOT / 'config/global.json').read_text())['market']
+        self.settings = json.loads((ROOT / 'market_trading_bot/config/global.json').read_text())['market']
         self.settings['request_interval_seconds'] = 0
-        parameters = json.loads((ROOT / 'config/etf_rotation_strategy.json').read_text())['parameters']
+        parameters = json.loads((ROOT / 'market_trading_bot/config/etf_rotation_strategy.json').read_text())['parameters']
         self.strategy = ETFRotationStrategyImpl(parameters)
         self.days = pd.bdate_range(end=NOW.date() - timedelta(days=1), periods=self.strategy.history_points)
         self.daily = pd.DataFrame({'日期': self.days, '收盘': [100 * math.exp(i * .001) for i in range(len(self.days))]})
