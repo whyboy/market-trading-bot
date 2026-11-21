@@ -66,7 +66,7 @@ class TaskScheduler:
                     strategy_id = config['strategy']
                     self.configs[strategy_id] = config
             # 每天北京时间 9:00 确认交易日并安排交易。
-            self.timer.add_job(self.prepare_day, 'cron', hour=9, minute=0, id='_calendar',
+            self.timer.add_job(self.prepare_calender_context, 'cron', hour=9, minute=0, id='_calendar',
                                coalesce=True, max_instances=1, misfire_grace_time=300)
             # 每天北京时间 15:05 更新收盘估值。
             self.timer.add_job(self._start_valuation, 'cron', hour=15, minute=5, id='_daily_valuation',
@@ -77,12 +77,12 @@ class TaskScheduler:
             # 每 5 秒更新服务心跳。
             self.timer.add_job(self._heartbeat, 'interval', seconds=5, id='_heartbeat')
             self.timer.start()
-            self.prepare_day(startup=True)
+            self.prepare_calender_context(startup=True)
         except BaseException:
             self.stop()
             raise
 
-    def prepare_day(self, startup=False):
+    def prepare_calender_context(self, startup=False):
         """获取当天交易日历，交易日注册任务；休市日仅记录状态。"""
         if not self.configs or not self.calendar_lock.acquire(blocking=False):
             return
@@ -93,7 +93,7 @@ class TaskScheduler:
             context = self._prepare_calendar(day, single_attempt=startup)
             if context is None or self.stop_event.is_set() or self.now().date() != day:
                 if startup and not self.stop_event.is_set() and self.now().date() == day:
-                    self.timer.add_job(self.prepare_day, id='_startup_calendar_retry', replace_existing=True)
+                    self.timer.add_job(self.prepare_calender_context, id='_startup_calendar_retry', replace_existing=True)
                 return
             self.calendar_day = day
             self.is_trading_day = context['is_trading_day']
