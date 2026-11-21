@@ -91,17 +91,18 @@ class TaskScheduler:
             if self.calendar_prepared_date == today:
                 return
             context = self._prepare_calendar(today, single_attempt=startup)
-            if context is None or self.stop_event.is_set() or self.now().date() != today:
-                if startup and not self.stop_event.is_set() and self.now().date() == today:
+            if self.stop_event.is_set() or self.now().date() != today:
+                return
+            if context is None:
+                if startup:
                     self.timer.add_job(self.prepare_calender_context, id='_startup_calendar_retry', replace_existing=True)
                 return
             self.calendar_day = today
             self.is_trading_day = context['is_trading_day']
-            if not self.is_trading_day:
-                self.calendar_prepared_date = today
-                logging.getLogger(__name__).info('%s 非交易日，不注册交易及每日任务', today)
-                return
-            self._register_daily_tasks(today)
+            if self.is_trading_day:
+                self._register_daily_tasks(today)
+            else:
+                logging.getLogger(__name__).info('%s 非交易日，跳过交易、估值和日报', today)
             self.calendar_prepared_date = today
         finally:
             self.calendar_lock.release()
