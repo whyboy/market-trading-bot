@@ -14,7 +14,7 @@ class BaoStockDaily:
 
     def daily(self, symbol, start, end, adjust):
         result = subprocess.run(
-            [sys.executable, '-m', 'market_trading_bot.market.BaoStockDaily'],
+            [sys.executable, '-m', 'market_trading_bot.market.source.BaoStockDaily'],
             input=json.dumps([symbol, start, end, adjust]), text=True, capture_output=True,
             timeout=self.timeout, check=True)
         return pd.DataFrame(json.loads(result.stdout), columns=['日期', '收盘'])

@@ -2,7 +2,7 @@
 import pandas as pd
 import unittest
 from datetime import date, datetime
-from market_trading_bot.market.HttpMarket import HttpMarket
+from market_trading_bot.market.source.HttpMarket import HttpMarket
 from market_trading_bot.market.MarketProvider import MarketProvider
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
@@ -25,14 +25,14 @@ class MarketProviderTests(unittest.TestCase):
         response = Mock(text=f'v_sz159915="{"~".join(fields)}";')
         now = datetime(2026, 11, 20, 14, 30, 10, tzinfo=ZoneInfo('Asia/Shanghai'))
         source = MarketProvider(15)
-        with patch('market_trading_bot.market.HttpMarket.requests.get', side_effect=[Mock(text=''), response]):
+        with patch('market_trading_bot.market.source.HttpMarket.requests.get', side_effect=[Mock(text=''), response]):
             self.assertEqual(source.quotes(['159915.XSHE'], lambda: now, 60)['159915.XSHE'][0], 2.23)
 
     def test_sina_quote_time(self):
         fields = ['0'] * 32
         fields[3], fields[30], fields[31] = '2.230', '2026-11-20', '14:30:01'
         response = Mock(text=f'var hq_str_sz159915="{",".join(fields)}";')
-        with patch('market_trading_bot.market.HttpMarket.requests.get', return_value=response):
+        with patch('market_trading_bot.market.source.HttpMarket.requests.get', return_value=response):
             result = HttpMarket(15).quotes(['159915.XSHE'], 'sina')
         self.assertEqual(result['159915.XSHE'], (2.23, datetime(2026, 11, 20, 14, 30, 1,
                                                               tzinfo=ZoneInfo('Asia/Shanghai'))))

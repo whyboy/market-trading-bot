@@ -2,8 +2,8 @@
 import logging
 import math
 import pandas as pd
-from market_trading_bot.market.BaoStockDaily import BaoStockDaily
-from market_trading_bot.market.HttpMarket import HttpMarket
+from market_trading_bot.market.source.BaoStockDaily import BaoStockDaily
+from market_trading_bot.market.source.HttpMarket import HttpMarket
 
 
 class MarketProvider:
