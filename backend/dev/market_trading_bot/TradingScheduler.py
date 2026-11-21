@@ -7,6 +7,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime, time, timezone
 from market_trading_bot.log.StrategyLogger import strategy_logging
 from market_trading_bot.market.AKShareMarket import AKShareMarket, SHANGHAI
+from market_trading_bot.notification.PushPlusNotifier import PushPlusNotifier
 from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
 from market_trading_bot.repository.TaskStatusRepository import TaskStatusRepository
 from market_trading_bot.strategy.ETFRotationStrategyImpl import ETFRotationStrategyImpl
@@ -63,6 +64,7 @@ class TradingScheduler:
             self.lock_file = None
             raise RuntimeError('已有调度服务运行，请只启动一个后端实例') from None
         try:
+            self.notifier = PushPlusNotifier(self.settings)
             for path in sorted((self.root / 'market_trading_bot/config').glob('*_strategy.json')):
                 config = json.loads(path.read_text())
                 if config.get('enable', True):
@@ -156,7 +158,7 @@ class TradingScheduler:
             account_repository=PapAccountRepository(self.root / self.settings['storage']['data_dir'], instance['id']),
             status_repository=TaskStatusRepository(self.root, strategy_id, instance['id']),
             strategy_id=strategy_id, instance_id=instance['id'], initial_cash=instance['initial_cash'],
-            scheduled_at=scheduled_at,
+            scheduled_at=scheduled_at, notifier=self.notifier,
             trade_timeout_seconds=self.settings.get('runtime', {}).get('trade_timeout_seconds', 300),
             log_context=strategy_logging(self.root, strategy_id, self.settings['logging']))
 

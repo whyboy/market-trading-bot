@@ -14,7 +14,7 @@ class TradingTask:
     """协调已注入的依赖，不读取配置或构建策略、行情、执行器及Repository。"""
 
     def __init__(self, strategy, market, executor, account_repository, status_repository, *,
-                 strategy_id, instance_id, initial_cash, scheduled_at, trade_timeout_seconds=300,
+                 strategy_id, instance_id, initial_cash, scheduled_at, notifier, trade_timeout_seconds=300,
                  log_context=None):
         self.strategy = strategy
         self.market = market
@@ -34,6 +34,8 @@ class TradingTask:
                        'last_execution': None, 'current_execution': None,
                        'trade_timeout_seconds': trade_timeout_seconds}
         self.result = None
+        self.output = None
+        self.notifier = notifier
 
     def start(self):
         self.status['current_execution'] = {'instance_id': self.instance_id, 'started_at': self.now().isoformat()}
@@ -55,7 +57,7 @@ class TradingTask:
                     if self.stop_event.is_set():
                         execution.update(success=False, error='任务已停止')
                     else:
-                        self.run_pap()
+                        self.output = self.run_pap()
                         execution['success'] = True
                         logger.info('任务完成 strategy=%s instance=%s', self.strategy_id, self.instance_id)
                 except Exception as exc:
@@ -67,7 +69,10 @@ class TradingTask:
             execution['finished_at'] = self.now().isoformat()
             self.result = {**execution, 'state': 'success' if execution.get('success') else 'failed'}
             self.status.update(state='completed', current_execution=None, last_execution=execution)
-            self._heartbeat()
+            try:
+                self._heartbeat()
+            finally:
+                self.notifier.send_trade_execution_report(self)
 
     def run_pap(self) -> dict:
         """已有当日账本则直接返回，否则获取行情、计算信号并原子调仓。"""

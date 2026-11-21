@@ -78,7 +78,7 @@ backend/.venv/bin/python backend/main.py
 | `storage.data_dir` | SQLite 账本与 CSV 目录 |
 | `logging` | 日志目录、级别和保留日期数 |
 | `runtime.trade_timeout_seconds` | 交易执行超时阈值，默认 300 秒，仅标记异常 |
-| `pushplus` | 预留配置，当前不发送推送 |
+| `pushplus.token` | PushPlus 消息 Token，报告生成后直接发送 |
 
 策略配置位于 `backend/dev/market_trading_bot/config/etf_rotation_strategy.json`：
 
@@ -97,7 +97,7 @@ backend/.venv/bin/python backend/main.py
 | `schedule.trade_time` | `14:30` | 北京时间自动调仓时间 |
 | `schedule.report_time` | `15:15` | 收盘日报时间，当前尚未实现 |
 
-`initial_cash` 仅在首次开户时使用并保存到账本；后续修改配置不会改变账户基准。PushPlus Token 等凭据不要提交到仓库。
+`initial_cash` 仅在首次开户时使用并保存到账本；后续修改配置不会改变账户基准。PushPlus Token 配置在 `global.json` 的 `pushplus.token` 中。
 
 ## 账户数据
 
@@ -206,6 +206,22 @@ Azure 网络安全组放行 TCP `8080` 后，访问 `http://<服务器公网IP>:
 - 运维：容器以非 root 用户运行，自动重启并轮转容器日志；只运行一个实例。
 - 排查：`docker compose logs --tail=100 -f trading` 查看日志，`/api/runtime` 查看调度与交易状态；容器健康检查仅验证 API 响应。
 - 停止：执行 `docker compose down`。停止或更新时最多等待 2 分钟，超时会强制结束进程，宜在无交易任务运行时操作。
+
+### 微信执行报告（PushPlus）
+
+每个交易日北京时间 14:30 执行策略，结束后按账户推送微信报告；无成交也发送，失败则通知查看日志。
+消息格式分为 `TradeExecutionReport`（交易执行报告）和 `DailyAccountReport`（每日收益总结）。
+每日总结格式已定义，包含估值时间、总资产、现金、当日及累计盈亏和收益率、持仓及买卖笔数；休市时标明最近有效估值。
+收盘估值及每日 15:05 定时发送尚未接入，当前休市日不发送。
+
+报告为纯文本，包含：
+
+- 策略、账户、执行结果、计划时间及结束时间。
+- 执行时估值时间、总资产、可用现金、累计盈亏及收益率。
+- 买卖标的、数量、成交价格、手续费及调仓后持仓；无成交注明“今日无调仓”。
+
+累计收益以实际开户资金为基准，包含交易费用，使用执行时估值，不代表收盘收益。
+配置位于 `global.json` 的 `pushplus`；报告生成后直接发送，不保存消息；网络或服务端临时故障最多尝试 3 次，间隔 1、2 秒，配置错误不重试。最终失败仅记录日志，不影响交易结果；超时重试可能重复送达。
 
 ### API
 
