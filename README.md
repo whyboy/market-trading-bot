@@ -148,8 +148,8 @@ npm ci --prefix frontend
 # 后端：8000
 .venv/bin/python -m uvicorn market_trading_bot.web.app:app --app-dir src --host 127.0.0.1 --port 8000
 
-# 前端：5173，浏览器打开 http://127.0.0.1:5173
-npm run dev --prefix frontend -- --port 5173 --strictPort
+# 前端：8001，浏览器打开 http://127.0.0.1:8001
+npm run dev --prefix frontend -- --port 8001 --strictPort
 
 # 交易进程：无 HTTP 端口，每 5 秒上报心跳
 .venv/bin/python worker.py
