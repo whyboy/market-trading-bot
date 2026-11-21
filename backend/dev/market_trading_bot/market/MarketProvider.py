@@ -12,11 +12,11 @@ class MarketProvider:
         self.baostock = BaoStockDaily(timeout)
         self.http = HttpMarket(timeout)
 
-    def quotes(self, symbols, now, max_age):
+    def get_quotes(self, symbols, now, max_age):
         errors = []
         for provider in ('sina', 'tencent'):
             try:
-                quotes = self.http.quotes(symbols, provider)
+                quotes = self.http.get_quotes(symbols, provider)
                 observed_at = now()
                 for price, quoted_at in quotes.values():
                     age = (observed_at - quoted_at).total_seconds()
@@ -28,13 +28,13 @@ class MarketProvider:
                 self.logger.warning('报价源失败 provider=%s error=%s', provider, exc)
         raise ValueError('所有报价源失败: ' + '; '.join(errors))
 
-    def daily(self, symbol, start, end, adjust, required_days=None):
+    def get_daily_closes(self, symbol, start, end, adjust, required_days=None):
         if adjust not in ('', 'qfq'):
             raise ValueError('不支持的复权类型')
-        sources = [('baostock', lambda: self.baostock.daily(symbol, start, end, adjust)),
-                   ('tencent', lambda: self.http.daily(symbol, start, end, adjust, 'tencent'))]
+        sources = [('baostock', lambda: self.baostock.get_daily_closes(symbol, start, end, adjust)),
+                   ('tencent', lambda: self.http.get_daily_closes(symbol, start, end, adjust, 'tencent'))]
         if not adjust:
-            sources.append(('sina', lambda: self.http.daily(symbol, start, end, adjust, 'sina')))
+            sources.append(('sina', lambda: self.http.get_daily_closes(symbol, start, end, adjust, 'sina')))
         errors = []
         for name, fetch in sources:
             try:

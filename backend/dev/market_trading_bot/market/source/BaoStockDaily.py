@@ -12,7 +12,7 @@ class BaoStockDaily:
     def __init__(self, timeout):
         self.timeout = timeout
 
-    def daily(self, symbol, start, end, adjust):
+    def get_daily_closes(self, symbol, start, end, adjust):
         result = subprocess.run(
             [sys.executable, '-m', 'market_trading_bot.market.source.BaoStockDaily'],
             input=json.dumps([symbol, start, end, adjust]), text=True, capture_output=True,
@@ -20,7 +20,7 @@ class BaoStockDaily:
         return pd.DataFrame(json.loads(result.stdout), columns=['日期', '收盘'])
 
     @staticmethod
-    def fetch(symbol, start, end, adjust):
+    def _fetch_daily_closes(symbol, start, end, adjust):
         """读取指定证券的日线；调用方负责限制整个进程的运行时间。"""
         market = 'sh' if symbol.endswith('.XSHG') else 'sz'
         with contextlib.redirect_stdout(io.StringIO()):
@@ -44,4 +44,4 @@ class BaoStockDaily:
 
 
 if __name__ == '__main__':
-    print(json.dumps(BaoStockDaily.fetch(*json.loads(sys.stdin.read()))))
+    print(json.dumps(BaoStockDaily._fetch_daily_closes(*json.loads(sys.stdin.read()))))

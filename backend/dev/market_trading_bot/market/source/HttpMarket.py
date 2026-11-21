@@ -20,7 +20,7 @@ class HttpMarket:
             raise ValueError(f'不支持的证券代码: {symbol}')
         return ('sh' if match.group(2) == 'XSHG' else 'sz') + match.group(1)
 
-    def quotes(self, symbols, provider):
+    def get_quotes(self, symbols, provider):
         codes = {self.code(symbol): symbol for symbol in symbols}
         if len(codes) != len(symbols):
             raise ValueError('证券代码重复')
@@ -51,7 +51,7 @@ class HttpMarket:
             raise ValueError(f'{provider}: 报价缺少标的')
         return {codes[key]: value for key, value in quotes.items()}
 
-    def daily(self, symbol, start, end, adjust, provider):
+    def get_daily_closes(self, symbol, start, end, adjust, provider):
         code = self.code(symbol)
         if provider == 'sina':
             if adjust:
