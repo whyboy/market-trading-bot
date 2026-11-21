@@ -119,18 +119,20 @@ class DailyValuationTask:
                 'daily_pnl': str(equity - baseline), 'daily_return_pct': str((equity / baseline - 1) * 100),
                 'buy_count': sum(fill['side'] == 'buy' for fill in fills),
                 'sell_count': sum(fill['side'] == 'sell' for fill in fills),
-                'execution_note': '' if account['date'] == day.isoformat() else '今日策略未完成记账，按现有持仓估值。'}
+                'execution_note': (f"链路测试：使用 {self.context['test_close_day']} 收盘价，不代表实时收益。"
+                                   if self.context.get('test_close_day') else
+                                   '' if account['date'] == day.isoformat() else '今日策略未完成记账，按现有持仓估值。')}
 
     def _closing_assets(self, market, account, day):
         """按指定交易日收盘价计算资产及累计收益。"""
-        prices = market.closing_prices(account['positions'], day)
+        prices = market.closing_prices(account['positions'], self.context.get('test_close_day', day))
         equity = Decimal(account['cash']) + sum((prices[symbol] * position['quantity']
                                                for symbol, position in account['positions'].items()), Decimal('0'))
         equity = equity.quantize(Decimal('.01'), rounding=ROUND_HALF_UP)
         initial_cash = Decimal(account['initial_cash'])
         if initial_cash <= 0:
             raise ValueError('实际开户资金必须大于零')
-        return {'date': day.isoformat(), 'as_of': datetime.combine(day, time(15), SHANGHAI).isoformat(),
+        return {'date': day.isoformat(), 'as_of': datetime.combine(self.context.get('test_close_day', day), time(15), SHANGHAI).isoformat(),
                 'equity': str(equity), 'cash': account['cash'], 'positions': account['positions'],
                 'cumulative_pnl': str(equity - initial_cash),
                 'cumulative_return_pct': str((equity / initial_cash - 1) * 100)}

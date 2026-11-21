@@ -19,6 +19,7 @@
     "level": "INFO"
   },
   "runtime": {
-    "trade_timeout_seconds": 300
+    "trade_timeout_seconds": 300,
+    "test_mode": false
   }
 }

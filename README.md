@@ -84,6 +84,7 @@ backend/.venv/bin/python backend/main.py
 | `storage.data_dir` | SQLite 账本与 CSV 目录 |
 | `logging` | 日志目录、级别和保留日期数 |
 | `runtime.trade_timeout_seconds` | 交易执行超时阈值，默认 300 秒，仅标记异常 |
+| `runtime.test_mode` | 一次性部署链路测试，默认 `false` |
 | `pushplus.token` | PushPlus 消息 Token，报告生成后直接发送 |
 
 策略配置位于 `backend/dev/market_trading_bot/config/etf_rotation_strategy.json`：
@@ -140,7 +141,7 @@ backend/.venv/bin/python backend/main.py
 ## 定时执行规则
 
 - `TaskScheduler` 启动时立即加载当天交易日历，失败时按日历获取规则重试；尚未准备成功时，各任务跳过执行。每天北京时间 **9:00** 确认当天交易日，失败每隔 5 秒重试，停止服务或到 15:00 时结束重试。
-- 确认当天为交易日后，按各策略 `schedule.trade_time`（默认 `14:30`）注册当天执行时间；休市日不注册、不创建任务。
+- 按各策略 `schedule.trade_time`（默认 `14:30`）触发交易；休市日跳过执行。
 - 启动服务后统一注册每日交易、估值和日报定时任务，执行前检查当天已准备的交易日历；不补执行已错过的交易任务。
 - `enable` 默认为 `true`，设为 `false` 不安排该策略。到点为每个启用的策略账户创建独立 `TradingTask` 线程，完成后退出。
 - 一个策略＋一个账户对应一个 Task；账户间独立执行，同一账户不重叠。调度器为每个 Task 构建独立策略、行情、模拟执行器及 Repository 对象，Task 不读取配置、不构建业务依赖。
@@ -159,6 +160,12 @@ TaskScheduler → TradingTask（绑定策略＋账户）
 
 Repository 不依赖执行器。Task 在账户事务内读取最新快照、检查当日结果、调用执行器并保存；任一步失败整体回滚，保证并发防重复与资金一致性。
 网页选择账户后读取对应任务状态；未指定账户查询时汇总整个策略，任一运行账户超时都会显示异常。
+
+## 一次性部署链路测试
+
+将 `global.json` 的 `runtime.test_mode` 设为 `true` 后部署并启动。服务启动 10 分钟后执行一次：依次运行交易、估值和日报，并等待每一步结束。测试模式不注册正常交易及日报的周期任务；每次重启都会重新安排一次测试。测试完成后将开关改回 `false` 并重启，恢复正常调度。
+
+交易和估值使用最近一个已完成交易日的收盘价，不代表实时行情或实盘下单；日志与日报会标明行情日期。测试账户 ID 带 `_test_` 和启动时间，账本与日志分别放在配置的数据及日志目录下的 `chain_test/` 子目录中，与正常账户隔离；网页在测试模式下显示测试账户和日志。测试结果会发送交易执行报告和日报，推送依赖有效的 PushPlus 配置及网络。
 
 ## 网页运行监控
 

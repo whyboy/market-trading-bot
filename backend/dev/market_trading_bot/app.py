@@ -112,8 +112,14 @@ def get_strategy(strategy_id, configs):
 
 
 def load_strategies():
+    scheduler = getattr(app.state, 'scheduler', None)
+    if scheduler is not None and getattr(scheduler, 'test_mode', False):
+        return list(scheduler.configs.values())
     return [json.loads(path.read_text()) for path in sorted((ROOT / 'market_trading_bot/config').glob('*_strategy.json'))]
 
 
 def load_settings():
+    scheduler = getattr(app.state, 'scheduler', None)
+    if scheduler is not None and getattr(scheduler, 'test_mode', False):
+        return scheduler.settings
     return json.loads((ROOT / 'market_trading_bot/config/global.json').read_text())
