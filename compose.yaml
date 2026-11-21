@@ -1,0 +1,22 @@
+name: market-trading-bot
+services:
+  trading:
+    build: .
+    image: market-trading-bot:local
+    init: true
+    restart: unless-stopped
+    ports:
+      - "${TRADING_BIND_ADDRESS:-127.0.0.1}:${TRADING_PORT:-8081}:8081"
+    volumes:
+      - trading-data:/app/backend/dev/data
+      - trading-logs:/app/backend/dev/logs
+      - ./backend/dev/market_trading_bot/config:/app/backend/dev/market_trading_bot/config:ro
+    stop_grace_period: 2m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  trading-data:
+  trading-logs:

@@ -16,9 +16,9 @@ ETF 动量轮动程序，启动后按交易日定时模拟调仓，并提供网�
 
 ```text
 market-trading-bot/
-├── frontend/                              # 前端，开发端口8000
+├── frontend/                              # 前端，开发端口8080
 ├── backend/
-│   ├── main.py                            # 后端启动入口，默认端口8001
+│   ├── main.py                            # 后端启动入口，默认端口8081
 │   ├── requirements.txt
 │   ├── dev/                               # 后端源码和运行资源，生产环境同样使用
 │   │   ├── logs/                          # 运行日志，启动后生成
@@ -58,7 +58,7 @@ python -m venv backend/.venv
 backend/.venv/bin/python -m pip install -r backend/requirements.txt
 ```
 
-启动后端和每日调度服务（默认端口 `8001`）：
+启动后端和每日调度服务（默认端口 `8081`）：
 
 ```bash
 backend/.venv/bin/python backend/main.py
@@ -172,20 +172,40 @@ npm ci --prefix frontend
 开发时分别在两个终端启动：
 
 ```bash
-# 后端：8001，自动注册每日任务
+# 后端：8081，自动注册每日任务
 backend/.venv/bin/python backend/main.py
 
-# 前端：8000，浏览器打开 http://127.0.0.1:8000
-npm run dev --prefix frontend -- --port 8000 --strictPort
+# 前端：8080，浏览器打开 http://127.0.0.1:8080
+npm run dev --prefix frontend -- --port 8080 --strictPort
 ```
 
-前端将 `/api` 请求代理到后端 `8001`。调度服务每 5 秒更新自身心跳；执行期间页面显示任务线程的心跳，任务结束后显示等待下次执行。任务线程在策略执行前后更新心跳，不另外创建心跳线程。
+前端将 `/api` 请求代理到后端 `8081`。调度服务每 5 秒更新自身心跳；执行期间页面显示任务线程的心跳，任务结束后显示等待下次执行。任务线程在策略执行前后更新心跳，不另外创建心跳线程。
 待命超过 20 秒未更新心跳判定失联；交易执行超时由 `runtime.trade_timeout_seconds` 配置，默认 300 秒。
 超时只标记异常，不会强制中断或重试交易。
 后端仅启动一个实例；启动后按上述定时规则自动调仓。服务正常关闭时等待正在执行的交易结束，不再启动新任务。
 
 部署时执行 `npm run build --prefix frontend`，只需启动一个后端服务，
-通过 `http://127.0.0.1:8001` 同时访问页面与 API，无需启动前端开发服务。
+通过 `http://127.0.0.1:8081` 同时访问页面与 API，无需启动前端开发服务。
+
+### Docker 部署（Azure VM）
+
+在项目根目录执行，首次部署和更新使用同一命令：
+
+```bash
+docker compose up -d --build
+docker compose ps
+curl -f http://127.0.0.1:8081/api/strategies
+```
+
+镜像自动构建前端，由单个 Python 服务提供页面、API 和定时模拟交易，默认监听本机 `127.0.0.1:8081`。
+使用 `deploy/nginx.conf` 配置 Nginx 转发 `8080 → 8081`；安装前备份现有站点，执行 `nginx -t` 通过后 reload。
+Azure 网络安全组放行 TCP `8080` 后，访问 `http://<服务器公网IP>:8080`。
+
+- 配置：修改 `backend/dev/market_trading_bot/config` 后，执行 `docker compose restart trading` 生效。
+- 数据：账本和日志保存在命名卷，重建或停止容器均保留；`docker compose down -v` 会删除数据。已有本地账本需停服后手动迁移。
+- 运维：容器以非 root 用户运行，自动重启并轮转容器日志；只运行一个实例。
+- 排查：`docker compose logs --tail=100 -f trading` 查看日志，`/api/runtime` 查看调度与交易状态；容器健康检查仅验证 API 响应。
+- 停止：执行 `docker compose down`。停止或更新时最多等待 2 分钟，超时会强制结束进程，宜在无交易任务运行时操作。
 
 ### API
 
