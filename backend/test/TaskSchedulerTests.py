@@ -33,7 +33,7 @@ class TaskSchedulerTests(unittest.TestCase):
                                     return_value=[date(2026, 11, 19), date(2026, 11, 20), date(2026, 11, 24)])
         self.calendar = self.calendar_patch.start()
         self.scheduler = TaskScheduler(self.root)
-        with patch.object(self.scheduler, 'prepare_calender_context'):
+        with patch.object(self.scheduler, 'prepare_calendar_context'):
             self.scheduler.start()
         self.scheduler.timer.pause()
 
@@ -45,7 +45,7 @@ class TaskSchedulerTests(unittest.TestCase):
 
     def prepare(self):
         self.current = DUE.replace(hour=9, minute=0)
-        self.scheduler.prepare_calender_context()
+        self.scheduler.prepare_calendar_context()
 
     def test_daily_calendar_trigger_is_nine_am(self):
         trigger = self.scheduler.timer.get_job('_calendar').trigger
@@ -64,13 +64,13 @@ class TaskSchedulerTests(unittest.TestCase):
         trigger = self.scheduler.timer.get_job('etf_rotation').trigger
         self.assertEqual(trigger.get_next_fire_time(None, self.current), DUE)
         self.assertEqual(trigger.get_next_fire_time(DUE, DUE + timedelta(seconds=1)), DUE + timedelta(days=1))
-        self.scheduler.prepare_calender_context()
+        self.scheduler.prepare_calendar_context()
         self.calendar.assert_called_once()
 
     def test_holiday_allows_scheduled_trade_with_prepared_calendar(self):
         self.current = DUE.replace(day=23, hour=9)
         with self.assertLogs('market_trading_bot.TaskScheduler', level='INFO') as logs:
-            self.scheduler.prepare_calender_context()
+            self.scheduler.prepare_calendar_context()
         self.assertIn('非交易日', logs.output[0])
         self.assertFalse(self.scheduler.calendar_context['is_trading_day'])
         with patch.object(self.scheduler, '_build_trade_task') as build:
@@ -243,7 +243,7 @@ class TaskSchedulerTests(unittest.TestCase):
         scheduler.timer.pause()
         try:
             self.current = DUE.replace(hour=9)
-            scheduler.prepare_calender_context()
+            scheduler.prepare_calendar_context()
             self.calendar.assert_called_once()
             self.assertIsNotNone(scheduler.timer.get_job('etf_rotation'))
             self.assertIsNotNone(scheduler.timer.get_job('second'))
@@ -363,7 +363,7 @@ class TaskSchedulerTests(unittest.TestCase):
              patch.object(self.scheduler, '_build_trade_task') as trade, \
              patch('market_trading_bot.TaskScheduler.DailyValuationTask') as valuation, \
              patch('market_trading_bot.TaskScheduler.DailySummaryTask') as summary:
-            self.scheduler.prepare_calender_context()
+            self.scheduler.prepare_calendar_context()
             self.scheduler._start_trades('etf_rotation')
             self.scheduler._start_valuation()
             self.scheduler._start_summary()

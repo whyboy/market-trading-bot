@@ -76,10 +76,10 @@ class TaskScheduler:
                 self.timer.add_job(self._start_trades, 'cron', hour=trade_time.hour, minute=trade_time.minute,
                                    second=trade_time.second, args=[strategy_id], id=strategy_id,
                                    coalesce=True, max_instances=1, misfire_grace_time=5)
-            schedule = self.settings.get('schedule', {})
-            calendar_time = time.fromisoformat(schedule.get('calendar_time', '09:00'))
-            valuation_time = time.fromisoformat(schedule.get('valuation_time', '15:05'))
-            self.timer.add_job(self.prepare_calender_context, 'cron', hour=calendar_time.hour,
+            schedule = self.settings['schedule']
+            calendar_time = time.fromisoformat(schedule['calendar_time'])
+            valuation_time = time.fromisoformat(schedule['valuation_time'])
+            self.timer.add_job(self.prepare_calendar_context, 'cron', hour=calendar_time.hour,
                                minute=calendar_time.minute, second=calendar_time.second, id='_calendar',
                                coalesce=True, max_instances=1, misfire_grace_time=300)
             self.timer.add_job(self._start_valuation, 'cron', hour=valuation_time.hour,
@@ -95,7 +95,7 @@ class TaskScheduler:
             self.timer.add_job(self._heartbeat, 'interval', seconds=5, id='_heartbeat')
             self.timer.start()
             # 启动时先准备当天日历；晚于收盘估值时间启动时补做估值和日报。
-            self.prepare_calender_context()
+            self.prepare_calendar_context()
             if (self.now().time() >= valuation_time or
                     any(self.now().time() >= time.fromisoformat(value) for value in report_times)):
                 self.timer.add_job(self._recover_daily_tasks, args=[self.now().date()], id='_startup_daily_tasks')
@@ -103,7 +103,7 @@ class TaskScheduler:
             self.stop()
             raise
 
-    def prepare_calender_context(self):
+    def prepare_calendar_context(self):
         """获取当天交易日历并保存状态；收盘前每 5 秒重试，收盘后最多尝试 3 次。"""
         if not self.configs or not self.calendar_lock.acquire(blocking=False):
             return
@@ -204,7 +204,7 @@ class TaskScheduler:
         try:
             day = self.now().date()
             if (self.stop_event.is_set() or (scheduled_day is not None and scheduled_day != day)
-                    or self.now().time() < time.fromisoformat(self.settings.get('schedule', {}).get('valuation_time', '15:05'))
+                    or self.now().time() < time.fromisoformat(self.settings['schedule']['valuation_time'])
                     or self.valuation_day == day):
                 return
             if self.valuation_task is not None and self.valuation_task.thread.is_alive():
@@ -216,7 +216,7 @@ class TaskScheduler:
             close_day = day if context['is_trading_day'] and self.now().time() >= time(15) else context['previous_trading_day']
             valuation_context = {**context, 'is_trading_day': True, 'price_day': close_day}
             task = DailyValuationTask(self.root, self.settings, self.configs, valuation_context,
-                                      self.stop_event, self._is_trading, self.now)
+                                      self.stop_event, self._is_trade_running, self.now)
             self.valuation_task = task
             task.start()
             self.valuation_day = day
@@ -253,14 +253,14 @@ class TaskScheduler:
         """仅允许使用当天已准备完成的交易日历。"""
         context = self.calendar_context
         if context is None or context['day'] != day:
-            self.prepare_calender_context()
+            self.prepare_calendar_context()
             context = self.calendar_context
         if context is None or context['day'] != day:
             logging.getLogger(__name__).warning('%s 交易日历未准备成功，跳过任务', day)
             return None
         return context
 
-    def _is_trading(self, strategy_id, instance_id):
+    def _is_trade_running(self, strategy_id, instance_id):
         """判断指定策略账户的交易线程是否仍在运行。"""
         with self.tasks_lock:
             task = self.tasks.get((strategy_id, instance_id))

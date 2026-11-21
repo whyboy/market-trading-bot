@@ -21,6 +21,7 @@ class AppTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         (self.root / 'market_trading_bot/config').mkdir(parents=True)
         (self.root / 'market_trading_bot/config/global.json').write_text(json.dumps({
+            'schedule': {'calendar_time': '09:00', 'valuation_time': '15:05'},
             'pushplus': {'token': 'test-token'}, 'market': {'provider': 'akshare_eastmoney',
                 'max_quote_age_seconds': 60, 'history_lookback_days': 60,
                 'request_timeout_seconds': 15, 'request_interval_seconds': 0},

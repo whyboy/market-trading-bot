@@ -83,7 +83,7 @@ backend/.venv/bin/python backend/main.py
 | `market` | 行情源、请求超时与间隔、报价最大延迟、历史回溯天数 |
 | `storage.data_dir` | SQLite 账本与 CSV 目录 |
 | `logging` | 日志目录、级别和保留日期数 |
-| `schedule.calendar_time` / `schedule.valuation_time` | 每日准备交易日历和估值的北京时间，默认 `09:00` / `15:05` |
+| `schedule.calendar_time` / `schedule.valuation_time` | 必填；每日准备交易日历和估值的北京时间，配置示例为 `09:00` / `15:05` |
 | `runtime.trade_timeout_seconds` | 交易执行超时阈值，默认 300 秒，仅标记异常 |
 | `pushplus.token` | PushPlus 消息 Token，报告生成后直接发送 |
 

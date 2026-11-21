@@ -12,7 +12,7 @@ class DailyValuationTask:
     class Stopped(RuntimeError):
         pass
 
-    def __init__(self, root, settings, configs, context, stop_event, is_running, now):
+    def __init__(self, root, settings, configs, context, stop_event, is_trade_running, now):
         """创建估值线程；context 为当天日历，stop_event 与调度器共享。"""
         self.context = context
         self.thread = threading.Thread(target=self._run, name='daily-valuation-task', daemon=True)
@@ -21,7 +21,7 @@ class DailyValuationTask:
         self.settings = settings
         self.configs = configs
         self.stop_event = stop_event
-        self.is_running = is_running
+        self.is_trade_running = is_trade_running
         self.now = now
         self.logger = logging.getLogger(__name__)
 
@@ -91,7 +91,7 @@ class DailyValuationTask:
     def _value_account(self, market, results_service, strategy_id, instance_id):
         """计算当日收益；缺失上一交易日估值时按历史持仓补算。"""
         day = self.context['day']
-        if self.is_running(strategy_id, instance_id):
+        if self.is_trade_running(strategy_id, instance_id):
             raise RuntimeError('交易任务仍在运行')
         close_day = day if self.context['is_trading_day'] else self.context['previous_trading_day']
         account = AccountService.get_snapshot(self.directory, instance_id, close_day.isoformat())
@@ -100,7 +100,7 @@ class DailyValuationTask:
                 raise ValueError('休市日尚无可估值账户')
             return self._closing_assets(market, account, close_day)
         snapshot = self._closing_assets(market, account, day)
-        if self.is_running(strategy_id, instance_id):
+        if self.is_trade_running(strategy_id, instance_id):
             raise RuntimeError('交易任务仍在运行')
         previous_day = self.context['previous_trading_day']
         previous = DailyResultsService.get_valuation(self.directory, instance_id, previous_day.isoformat())

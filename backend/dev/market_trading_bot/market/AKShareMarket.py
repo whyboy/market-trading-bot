@@ -46,8 +46,8 @@ class AKShareMarket:
             calendar = self.trading_calendar()
             if not calendar or not calendar[0] <= started_at.date() <= calendar[-1]:
                 raise MarketDataError('交易日历未覆盖当前日期')
-            if started_at.date() not in calendar or not self._is_session(started_at):
-                return self._load_closing_history(symbols, history_points, started_at, calendar)
+            if started_at.date() not in calendar or not self._is_trading_session(started_at):
+                return self._load_close_snapshots(symbols, history_points, started_at, calendar)
             secids = {}
             for symbol in symbols:
                 match = re.fullmatch(r'(\d{6})\.(XSHG|XSHE)', symbol)
@@ -56,15 +56,15 @@ class AKShareMarket:
                 market_id = '1' if match.group(2) == 'XSHG' else '0'
                 secids[f'{market_id}.{match.group(1)}'] = symbol
             self.logger.info('交易日历获取成功 date=%s coverage=%s~%s', started_at.date(), calendar[0], calendar[-1])
-            expected = [day for day in calendar if day < started_at.date()][-history_points:]
-            if len(expected) != history_points:
+            trading_days = [day for day in calendar if day < started_at.date()][-history_points:]
+            if len(trading_days) != history_points:
                 raise MarketDataError('交易日历历史不足')
-            histories = self._load_history(symbols, expected, started_at.date())
+            histories = self._load_daily_closes(symbols, trading_days, started_at.date())
             # 历史加载后批量取价，减少报价时间差。
             self.logger.info('批量当前报价请求开始 count=%d', len(symbols))
-            quotes = self._quotes(secids)
+            quotes = self._load_quotes(secids)
             as_of = datetime.now(SHANGHAI)
-            self._check_session(as_of)
+            self._check_trading_session(as_of)
             if as_of.date() != started_at.date():
                 raise MarketDataError('行情获取跨交易日，停止计算')
             snapshots = {}
@@ -110,7 +110,7 @@ class AKShareMarket:
         """获取完整交易日历，沿用行情请求超时和间隔配置。"""
         return sorted(set(self._request(ak.calendar_trade_date_hist_sina)['trade_date']))
 
-    def _quotes(self, secids: dict[str, str]) -> dict[str, tuple[float, datetime]]:
+    def _load_quotes(self, secids: dict[str, str]) -> dict[str, tuple[float, datetime]]:
         """批量获取未复权价格和报价时间，每个标的须恰好返回一条。"""
         response = self._request(
             requests.get, url='https://push2.eastmoney.com/api/qt/ulist.np/get',
@@ -131,19 +131,19 @@ class AKShareMarket:
         return {secids[key]: value for key, value in quotes.items()}
 
     @staticmethod
-    def _is_session(as_of: datetime):
+    def _is_trading_session(as_of: datetime):
         """判断是否处于 A 股连续交易时段。"""
         return time(9, 30) <= as_of.time() <= time(11, 30) or time(13) <= as_of.time() < time(15)
 
     @staticmethod
-    def _check_session(as_of: datetime):
-        if not AKShareMarket._is_session(as_of):
+    def _check_trading_session(as_of: datetime):
+        if not AKShareMarket._is_trading_session(as_of):
             raise MarketDataError('行情获取期间已离开 A 股连续交易时段')
 
-    def _load_history(self, symbols, expected, day):
-        """读取 day 之前的前复权历史，校验连续交易日和价格。"""
-        start_date = (day - timedelta(days=self.lookback_days)).strftime('%Y%m%d')
-        end_date = (day - timedelta(days=1)).strftime('%Y%m%d')
+    def _load_daily_closes(self, symbols, trading_days, before_day):
+        """读取 before_day 之前的前复权收盘价，校验交易日和价格。"""
+        start_date = (before_day - timedelta(days=self.lookback_days)).strftime('%Y%m%d')
+        end_date = (before_day - timedelta(days=1)).strftime('%Y%m%d')
         histories = {}
         for symbol in symbols:
             daily = self._request(ak.fund_etf_hist_em,
@@ -153,11 +153,11 @@ class AKShareMarket:
                 raise MarketDataError(f'{symbol}: 无历史行情')
             dates = pd.to_datetime(daily['日期'], errors='raise').dt.date
             daily = daily.assign(day=dates).sort_values('day')
-            daily = daily[daily['day'] < day]
+            daily = daily[daily['day'] < before_day]
             if daily['day'].duplicated().any():
                 raise MarketDataError(f'{symbol}: 历史日期重复')
-            daily = daily.tail(len(expected))
-            if daily['day'].tolist() != expected:
+            daily = daily.tail(len(trading_days))
+            if daily['day'].tolist() != trading_days:
                 raise MarketDataError(f'{symbol}: 历史行情不足或缺少交易日，请检查回溯窗口及数据源')
             self.logger.info('历史日线校验成功 symbol=%s used=%d start=%s end=%s', symbol, len(daily), daily.iloc[0]['day'], daily.iloc[-1]['day'])
             history = tuple(DailyClose(row.day, float(row.收盘)) for row in daily.itertuples())
@@ -166,18 +166,18 @@ class AKShareMarket:
             histories[symbol] = history
         return histories
 
-    def _load_closing_history(self, symbols, history_points, as_of, calendar):
+    def _load_close_snapshots(self, symbols, history_points, as_of, calendar):
         """使用最近已完成交易日收盘数据，按当前日期模拟执行。"""
         if not calendar or not calendar[0] <= as_of.date() <= calendar[-1]:
             raise MarketDataError('交易日历未覆盖当前日期')
-        completed = [day for day in calendar if day < as_of.date()
-                     or day == as_of.date() and as_of.time() >= time(15)]
-        if len(completed) <= history_points:
+        completed_days = [day for day in calendar if day < as_of.date()
+                          or day == as_of.date() and as_of.time() >= time(15)]
+        if len(completed_days) <= history_points:
             raise MarketDataError('交易日历历史不足')
-        close_day = completed[-1]
-        expected = completed[-history_points - 1:-1]
+        close_day = completed_days[-1]
+        trading_days = completed_days[-history_points - 1:-1]
         prices = self.closing_prices(symbols, close_day)
-        histories = self._load_history(symbols, expected, close_day)
+        histories = self._load_daily_closes(symbols, trading_days, close_day)
         finished_at = datetime.now(SHANGHAI)
         if finished_at.date() != as_of.date():
             raise MarketDataError('行情获取跨日期，停止计算')
