@@ -34,7 +34,7 @@ class TradeExecutionReport:
         lines.extend([f"估值时间：{output['signal']['as_of']}",
                       f"总资产：{Decimal(output['equity']):,.2f} 元",
                       f"可用现金：{Decimal(output['cash']):,.2f} 元"])
-        account = task.account_repository.latest(task.account_repository.directory.parent, task.instance_id)
+        account = task.account_repository.get_latest_account(task.account_repository.directory.parent, task.instance_id)
         if account.get('initial_cash'):
             initial = Decimal(account['initial_cash'])
             equity = Decimal(output['equity'])

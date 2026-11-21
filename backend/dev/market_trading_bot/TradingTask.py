@@ -76,7 +76,7 @@ class TradingTask:
 
     def run_pap(self) -> dict:
         """已有当日账本则直接返回，否则获取行情、计算信号并原子调仓。"""
-        committed = self.account_repository.completed(self.scheduled_at.date().isoformat())
+        committed = self.account_repository.find_execution_by_date(self.scheduled_at.date().isoformat())
         if committed is None:
             self.logger.info('获取行情 instance=%s', self.instance_id)
             as_of, snapshots = self.market.load(self.strategy.symbols, self.strategy.history_points)
@@ -90,7 +90,7 @@ class TradingTask:
             committed = self._rebalance(signal)
         output = {'operation': 'pap_rebalance', 'instance_id': self.instance_id, **committed}
         try:
-            self.account_repository.export_csv()
+            self.account_repository.export_trade_summary_csv()
             output['csv_exported'] = True
         except (OSError, sqlite3.Error):
             self.logger.exception('CSV导出失败；账本已提交，可重新导出')
@@ -99,13 +99,13 @@ class TradingTask:
 
     def _rebalance(self, signal):
         # 读取账户、防重复、模拟计算及保存共享同一事务，计算失败回滚全部修改。
-        with self.account_repository.transaction(signal.as_of.date().isoformat(), self.initial_cash) as transaction:
+        with self.account_repository.begin_rebalance_transaction(signal.as_of.date().isoformat(), self.initial_cash) as transaction:
             if transaction.completed is not None:
                 result = transaction.completed
             else:
                 result = self.executor.rebalance(signal, transaction.account)
                 result['signal'] = asdict(signal)
-                result = transaction.save(result)
+                result = transaction.save_execution_result(result)
         return result
 
     def _heartbeat(self):

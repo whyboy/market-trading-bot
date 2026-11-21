@@ -33,8 +33,8 @@ class DailyAccountServiceTests(unittest.TestCase):
 
     def save_account(self, day, cash='79995', quantity=200, instance='pap'):
         repository = PapAccountRepository(self.root / 'data', instance)
-        with repository.transaction(day.isoformat(), 100000) as transaction:
-            transaction.save({'date': day.isoformat(), 'cash': cash, 'equity': '100000',
+        with repository.begin_rebalance_transaction(day.isoformat(), 100000) as transaction:
+            transaction.save_execution_result({'date': day.isoformat(), 'cash': cash, 'equity': '100000',
                               'positions': {'510300.XSHG': {'quantity': quantity}} if quantity else {},
                               'fills': [{'side': 'buy', 'amount': '20000', 'commission': '5'}],
                               'signal': {'as_of': f'{day}T14:30:00+08:00'}})
@@ -184,6 +184,6 @@ class DailyAccountServiceTests(unittest.TestCase):
     def test_future_ledger_state_does_not_change_previous_close(self):
         self.save_account(date(2026, 11, 19), cash='90000', quantity=100)
         self.save_account(self.day, cash='79995', quantity=200)
-        previous = PapAccountRepository.snapshot(self.root / 'data', 'pap', '2026-11-19')
+        previous = PapAccountRepository.get_account_snapshot_on_or_before(self.root / 'data', 'pap', '2026-11-19')
         self.assertEqual(previous['cash'], '90000')
         self.assertEqual(previous['positions']['510300.XSHG']['quantity'], 100)

@@ -52,7 +52,7 @@ class DailyAccountService:
     def _summary(self, market, calendar, strategy_id, instance_id, day):
         if self.is_running(strategy_id, instance_id):
             raise RuntimeError('交易任务仍在运行')
-        account = PapAccountRepository.snapshot(self.directory, instance_id, day.isoformat())
+        account = PapAccountRepository.get_account_snapshot_on_or_before(self.directory, instance_id, day.isoformat())
         if not account['initialized']:
             return {'date': day.isoformat(), 'notice': '账户尚未开户，暂无持仓和收益数据。'}
         trading = day in calendar
@@ -60,7 +60,7 @@ class DailyAccountService:
             previous = self.valuations.latest(instance_id, day.isoformat())
             if previous is None:
                 close_day = max(value for value in calendar if value < day)
-                account = PapAccountRepository.snapshot(self.directory, instance_id, close_day.isoformat())
+                account = PapAccountRepository.get_account_snapshot_on_or_before(self.directory, instance_id, close_day.isoformat())
                 if not account['initialized']:
                     return {'date': day.isoformat(), 'notice': '今日休市，尚无有效收盘估值。'}
                 previous = self.valuations.save(instance_id, self._valuation(market, account, close_day))
@@ -74,7 +74,7 @@ class DailyAccountService:
         previous_day = max(value for value in calendar if value < day)
         previous = self.valuations.latest(instance_id, previous_day.isoformat())
         if previous is None or previous['date'] != previous_day.isoformat():
-            previous_account = PapAccountRepository.snapshot(self.directory, instance_id, previous_day.isoformat())
+            previous_account = PapAccountRepository.get_account_snapshot_on_or_before(self.directory, instance_id, previous_day.isoformat())
             if previous_account['initialized']:
                 previous = self.valuations.save(instance_id, self._valuation(market, previous_account, previous_day))
             else:

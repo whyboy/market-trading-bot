@@ -26,9 +26,9 @@ class PapAccountRepository:
                                   initial_cash TEXT NOT NULL)''')
 
     @staticmethod
-    def latest(directory: Path, instance_id: str) -> dict:
+    def get_latest_account(directory: Path, instance_id: str) -> dict:
         """只读查询最近账户快照；没有账本时不创建目录或账户。"""
-        snapshot = PapAccountRepository.snapshot(directory, instance_id, '9999-12-31')
+        snapshot = PapAccountRepository.get_account_snapshot_on_or_before(directory, instance_id, '9999-12-31')
         if not snapshot['initialized']:
             return snapshot
         return {'initialized': True, 'date': snapshot['date'],
@@ -37,7 +37,7 @@ class PapAccountRepository:
                 'initial_cash': snapshot['initial_cash']}
 
     @staticmethod
-    def snapshot(directory: Path, instance_id: str, day: str) -> dict:
+    def get_account_snapshot_on_or_before(directory: Path, instance_id: str, day: str) -> dict:
         """只读取得指定日期及之前的最新完整账本，包含成交和实际开户资金。"""
         if not re.fullmatch(r'[A-Za-z0-9_-]+', instance_id):
             raise ValueError('实例ID只能包含字母、数字、下划线及连字符')
@@ -55,17 +55,17 @@ class PapAccountRepository:
                 initial_cash = initial[0]
             else:
                 first = json.loads(connection.execute('SELECT payload FROM runs ORDER BY day LIMIT 1').fetchone()[0])
-                initial_cash = str(PapAccountRepository._restore_initial_cash([first]))
+                initial_cash = str(PapAccountRepository._infer_initial_cash_from_first_execution([first]))
         return {**snapshot, 'initialized': True, 'initial_cash': initial_cash}
 
-    def completed(self, day: str) -> dict | None:
+    def find_execution_by_date(self, day: str) -> dict | None:
         """读取指定日期已提交的结果；未运行返回 None。"""
         with closing(sqlite3.connect(self.database)) as connection, connection:
             row = connection.execute('SELECT payload FROM runs WHERE day = ?', (day,)).fetchone()
         return json.loads(row[0]) if row else None
 
     @contextmanager
-    def transaction(self, day: str, initial_cash: float):
+    def begin_rebalance_transaction(self, day: str, initial_cash: float):
         """锁定最新账户并检查当日结果，由调用方计算后保存，整体提交或回滚。"""
         with closing(sqlite3.connect(self.database, timeout=30)) as connection, connection:
             connection.execute('BEGIN IMMEDIATE')
@@ -97,7 +97,7 @@ class PapAccountRepository:
             self.completed = completed
             self.saved = False
 
-        def save(self, result: dict) -> dict:
+        def save_execution_result(self, result: dict) -> dict:
             if self.completed is not None or result['date'] != self.day:
                 raise ValueError('不能覆盖已完成结果或保存其他日期的结果')
             payload = json.dumps(result, ensure_ascii=False, default=str, allow_nan=False)
@@ -105,7 +105,7 @@ class PapAccountRepository:
             self.saved = True
             return json.loads(payload)
 
-    def export_csv(self):
+    def export_trade_summary_csv(self):
         """重建账户交易汇总，每个有成交的日期一行；无成交只保留在 SQLite。
 
         总资产采用调仓时估值；累计盈亏包含费用，收益率相对实际开户资金。
@@ -114,7 +114,7 @@ class PapAccountRepository:
         with closing(sqlite3.connect(self.database, timeout=30)) as connection, connection:
             connection.execute('BEGIN IMMEDIATE')
             runs = [json.loads(row[0]) for row in connection.execute('SELECT payload FROM runs ORDER BY day')]
-            initial_cash = self._initial_cash(connection, runs)
+            initial_cash = self._get_or_restore_initial_cash(connection, runs)
             fields = ['date', 'buy_etf', 'buy_quantity', 'buy_price',
                       'sell_etf', 'sell_quantity', 'sell_price', 'commission',
                       'holding_etf', 'holding_quantity', 'holding_price', 'market_value',
@@ -152,18 +152,18 @@ class PapAccountRepository:
                 (self.directory / f'{name}.csv').unlink(missing_ok=True)
 
     @classmethod
-    def _initial_cash(cls, connection: sqlite3.Connection, runs: list[dict]) -> Decimal:
+    def _get_or_restore_initial_cash(cls, connection: sqlite3.Connection, runs: list[dict]) -> Decimal:
         """读取开户资金；旧账本仅首次读取时从首笔记账反推并补存。"""
         row = connection.execute('SELECT initial_cash FROM account WHERE id = 1').fetchone()
         if row:
             return Decimal(row[0])
-        initial_cash = cls._restore_initial_cash(runs)
+        initial_cash = cls._infer_initial_cash_from_first_execution(runs)
         if runs:
             connection.execute('INSERT INTO account VALUES (1, ?)', (str(initial_cash),))
         return initial_cash
 
     @staticmethod
-    def _restore_initial_cash(runs: list[dict]) -> Decimal:
+    def _infer_initial_cash_from_first_execution(runs: list[dict]) -> Decimal:
         """从旧账本首笔记账的现金流还原开户资金。"""
         initial_cash = Decimal(runs[0]['cash']) if runs else Decimal('0')
         if runs:

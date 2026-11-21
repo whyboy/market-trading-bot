@@ -57,7 +57,7 @@ def account(instance_id: str):
         raise HTTPException(404, '账户不存在')
     if not any(instance['id'] == instance_id for item in strategies() for instance in item.get('instances', [])):
         raise HTTPException(404, '账户不存在')
-    return PapAccountRepository.latest(ROOT / settings()['storage']['data_dir'], instance_id)
+    return PapAccountRepository.get_latest_account(ROOT / settings()['storage']['data_dir'], instance_id)
 
 
 @app.get('/api/strategies/{strategy_id}/logs')
