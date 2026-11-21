@@ -145,21 +145,21 @@ npm ci --prefix frontend
 分别在三个终端启动：
 
 ```bash
-# 后端：8000
-.venv/bin/python -m uvicorn market_trading_bot.web.app:app --app-dir src --host 127.0.0.1 --port 8000
+# 后端：8001
+.venv/bin/python -m uvicorn market_trading_bot.web.app:app --app-dir src --host 127.0.0.1 --port 8001
 
-# 前端：8001，浏览器打开 http://127.0.0.1:8001
-npm run dev --prefix frontend -- --port 8001 --strictPort
+# 前端：8000，浏览器打开 http://127.0.0.1:8000
+npm run dev --prefix frontend -- --port 8000 --strictPort
 
 # 交易进程：无 HTTP 端口，每 5 秒上报心跳
 .venv/bin/python worker.py
 ```
 
-前端将 `/api` 请求代理到后端 `8000`。worker 默认待命；如需启动时执行一次模拟调仓，
+前端将 `/api` 请求代理到后端 `8001`。worker 默认待命；如需启动时执行一次模拟调仓，
 改用 `.venv/bin/python worker.py --pap etf_rotation_pap`。
 
 部署时执行 `npm run build --prefix frontend`，只需启动后端和 worker，
-通过 `http://127.0.0.1:8000` 同时访问页面与 API，无需启动前端开发服务。
+通过 `http://127.0.0.1:8001` 同时访问页面与 API，无需启动前端开发服务。
 当前无登录功能，公网访问需配置认证。
 
 ### API
