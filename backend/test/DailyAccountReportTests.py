@@ -1,8 +1,8 @@
 """每日总结区分交易日收益与休市日最近估值，并与执行报告独立去重。"""
 import tempfile
 import unittest
-from market_trading_bot.notification.DailyAccountReport import DailyAccountReport
 from market_trading_bot.notification.PushPlusNotifier import PushPlusNotifier
+from market_trading_bot.notification.report.DailyAccountReport import DailyAccountReport
 from pathlib import Path
 from unittest.mock import patch
 

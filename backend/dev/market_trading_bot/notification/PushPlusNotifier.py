@@ -1,8 +1,8 @@
 """隔离报告生成与网络发送，发送任务由现有调度器驱动。"""
 import logging
-from market_trading_bot.notification.DailyAccountReport import DailyAccountReport
 from market_trading_bot.notification.PushPlusClient import PushPlusClient
-from market_trading_bot.notification.TradeExecutionReport import TradeExecutionReport
+from market_trading_bot.notification.report.DailyAccountReport import DailyAccountReport
+from market_trading_bot.notification.report.TradeExecutionReport import TradeExecutionReport
 from market_trading_bot.repository.NotificationRepository import NotificationRepository
 
 
