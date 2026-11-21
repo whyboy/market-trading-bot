@@ -1,10 +1,10 @@
 """验证模拟资金守恒、恢复、并发去重和失败重跑，不访问外部行情。"""
 import unittest
 from decimal import Decimal
-from PapFixture import PapFixture
+from TradeExecutorFixture import TradeExecutorFixture
 
 
-class PapTraderTests(PapFixture, unittest.TestCase):
+class TradeExecutorTests(TradeExecutorFixture, unittest.TestCase):
     def test_commission_lot_size_and_conservation(self):
         result = self.rebalance(self.signal(), self.executor, 10000)
         self.assertEqual(result['positions']['A'], {'quantity': 900, 'sellable': 0})

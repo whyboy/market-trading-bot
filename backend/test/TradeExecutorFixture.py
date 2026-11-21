@@ -3,23 +3,23 @@ from datetime import datetime, timedelta
 from market_trading_bot.service.AccountService import AccountService
 from market_trading_bot.strategy.StrategyData import RankedETF, StrategyData
 from market_trading_bot.task.TradingTask import TradingTask
-from market_trading_bot.trader.PapTrader import PapTrader
+from market_trading_bot.trading.TradeExecutor import TradeExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock
 from zoneinfo import ZoneInfo
 
 
-class PapFixture:
+class TradeExecutorFixture:
     def setUp(self):
         self.temporary = TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.rules = {'A': {'lot_size': 100, 't_plus_one': True},
                       'B': {'lot_size': 100, 't_plus_one': False}}
-        self.executor = PapTrader({'commission_rate': .0002, 'minimum_commission': 5,
+        self.executor = TradeExecutor({'commission_rate': .0002, 'minimum_commission': 5,
                                        'slippage_rate': 0}, self.rules)
-        self.account_store = AccountService(self.root, 'pap')
+        self.account_store = AccountService(self.root, 'TradeExecutor')
 
     def signal(self, day=20, winner='A', weight=1, prices=(10, 20)):
         now = datetime(2026, 11, day, 14, 30, tzinfo=ZoneInfo('Asia/Shanghai'))
@@ -33,7 +33,7 @@ class PapFixture:
         market = Mock()
         market.load.return_value = (signal.as_of, {})
         return TradingTask(strategy, market, executor or self.executor, repository or self.account_store,
-                           strategy_id='etf_rotation', instance_id='pap', initial_cash=initial_cash,
+                           strategy_id='etf_rotation', instance_id='TradeExecutor', initial_cash=initial_cash,
                            scheduled_at=signal.as_of, notifier=Mock())
 
     def rebalance(self, signal, executor, initial_cash, repository=None):

@@ -22,7 +22,7 @@ class DailyValuationTaskTests(unittest.TestCase):
         self.day = date(2026, 11, 20)
         self.current = datetime(2026, 11, 20, 15, 5, tzinfo=SHANGHAI)
         self.settings = {'storage': {'data_dir': 'data'}, 'market': {}}
-        self.configs = {'etf_rotation': {'instances': [{'id': 'pap', 'enabled': True, 'mode': 'pap'}]}}
+        self.configs = {'etf_rotation': {'instances': [{'id': 'TradeExecutor', 'enabled': True, 'mode': 'pap'}]}}
         self.context = {'day': self.day, 'is_trading_day': True, 'previous_trading_day': date(2026, 11, 19)}
         self.stop = threading.Event()
         self.running = Mock(return_value=False)
@@ -32,7 +32,7 @@ class DailyValuationTaskTests(unittest.TestCase):
         self.market.closing_prices.side_effect = lambda symbols, day: {
             symbol: Decimal('105' if day == self.day else '100') for symbol in symbols}
 
-    def store(self, instance='pap'):
+    def store(self, instance='TradeExecutor'):
         return AccountService(self.root / 'data', instance, 'etf_rotation')
 
     def save_account(self, day, cash='79995', quantity=200):
@@ -49,7 +49,7 @@ class DailyValuationTaskTests(unittest.TestCase):
             return self.task.run()
 
     def result(self, day='2026-11-20'):
-        return DailyResultsService.get_daily_result(self.root / 'data', 'pap', day)
+        return DailyResultsService.get_daily_result(self.root / 'data', 'TradeExecutor', day)
 
     def test_first_day_uses_actual_initial_cash_and_preserves_execution(self):
         repository = self.save_account(self.day)

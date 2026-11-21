@@ -3,7 +3,7 @@ from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP
 from market_trading_bot.strategy.StrategyData import StrategyData
 
 
-class PapTrader:
+class TradeExecutor:
     """按整手、可卖数量、佣金和现金约束模拟成交，先卖后买。"""
 
     def __init__(self, settings: dict, instruments: dict):

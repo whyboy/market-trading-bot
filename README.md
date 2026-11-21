@@ -42,14 +42,14 @@ market-trading-bot/
 │   │       ├── market/                    # 行情适配及数据
 │   │       │   ├── AKShareMarket.py
 │   │       │   └── MarketData.py            # MarketData、DailyClose
-│   │       ├── trader/PapTrader.py
+│   │       ├── trading/TradeExecutor.py
 │   │       └── app.py
 │   └── test/                              # 核心测试，不与源码包同名
 │       ├── TaskSchedulerTests.py
 │       ├── strategy/ETFRotationStrategyImplTests.py
 │       ├── market/AKShareMarketTests.py
-│       ├── repository/PapAccountRepositoryTests.py
-│       ├── trader/PapTraderTests.py
+│       ├── repository/AccountRepositoryTests.py
+│       ├── trading/TradeExecutorTests.py
 │       └── AppTests.py
 ├── AGENTS.md
 └── README.md
@@ -139,9 +139,9 @@ backend/.venv/bin/python backend/main.py
 
 ## 定时执行规则
 
-- `TaskScheduler` 每天北京时间 **9:00** 加载交易日历，失败每隔 5 秒重试，停止服务或到 15:00 时结束重试。
+- `TaskScheduler` 启动时立即加载当天交易日历，失败时按日历获取规则重试；尚未准备成功时，各任务跳过执行。每天北京时间 **9:00** 确认当天交易日，失败每隔 5 秒重试，停止服务或到 15:00 时结束重试。
 - 确认当天为交易日后，按各策略 `schedule.trade_time`（默认 `14:30`）注册当天执行时间；休市日不注册、不创建任务。
-- 9:00 后启动服务会立即补做当天的交易日判断，只安排尚未到时间的策略，不补执行已错过的任务。
+- 启动服务后统一注册每日交易、估值和日报定时任务，执行前检查当天已准备的交易日历；不补执行已错过的交易任务。
 - `enable` 默认为 `true`，设为 `false` 不安排该策略。到点为每个启用的策略账户创建独立 `TradingTask` 线程，完成后退出。
 - 一个策略＋一个账户对应一个 Task；账户间独立执行，同一账户不重叠。调度器为每个 Task 构建独立策略、行情、模拟执行器及 Repository 对象，Task 不读取配置、不构建业务依赖。
 - 任务状态保存在内存中，页面显示当日计划执行时间、最近执行结果和交易日判断状态；服务重启后任务状态重置。配置修改后重启生效。
@@ -151,7 +151,7 @@ backend/.venv/bin/python backend/main.py
 ```text
 TaskScheduler → TradingTask（绑定策略＋账户）
                     ├── Market → MarketData → Strategy → StrategyData
-                    ├── PapTrader：纯内存模拟调仓
+                    ├── TradeExecutor：纯内存模拟调仓
                     └── AccountService：账户事务与CSV导出，调用账户及每日结果 Repository
 ```
 
@@ -219,10 +219,10 @@ Azure 网络安全组放行 TCP `8080` 后，访问 `http://<服务器公网IP>:
 | 报告 | 北京时间 | 内容 |
 |---|---|---|
 | 交易执行报告 | 交易日 14:30 策略执行结束后 | 成交、持仓、执行时资产和累计收益；无成交也发送 |
-| 每日收益总结 | 每天 15:10 | 一条消息按策略汇总所有启用的模拟账户，包含收盘资产、当日及累计收益、持仓和买卖笔数；休市日展示最近有效估值 |
+| 每日收益总结 | 每天 15:10 | 一条消息按策略汇总所有启用的模拟账户，包含收盘资产、当日及累计收益、持仓和买卖笔数；休市日不发送 |
 
 定时任务统一由外层 `TaskScheduler` 注册并管理，任务类集中在 `task/`：
-`TradingTask` 执行交易，`DailyValuationTask` 每天 15:05 更新收盘估值，`DailySummaryTask` 每天 15:10 只读汇总并发送。
+`TradingTask` 执行交易，`DailyValuationTask` 在交易日 15:05 更新收盘估值，`DailySummaryTask` 在交易日 15:10 只读汇总并发送。
 调度器统一获取并缓存当天日历，将是否交易日、上一交易日传给日报任务；任务不重复获取日历。
 报告为纯文本，由 `notification/report/` 中的 `TradeExecutionReport`、`DailyAccountReport` 生成。
 累计收益以账本实际开户资金为基准，包含交易费用。当日收益比较上一交易日收盘资产；首次开户以开户资金为基准。
@@ -234,7 +234,7 @@ Azure 网络安全组放行 TCP `8080` 后，访问 `http://<服务器公网IP>:
 收盘价尚未更新、日历异常或任务仍在执行时，间隔 30 秒最多尝试 3 次；15:10 汇总时按保存的状态标注未执行、执行中或失败，不影响其他账户；不使用旧价格代替当天收盘价。
 未开户发送“暂无收益数据”；当天策略未完成记账时，按现有持仓估值并注明。
 
-15:05 后启动先补估值；已过 15:10 时等待补估值结束再发送当天日报，不补发历史日期；同一进程内每天执行一次，重启后可能再次发送。
+交易日 15:05 后启动先确认交易日并补估值；已过 15:10 时等待补估值结束再发送当天日报，不补发历史日期；同一进程内每天执行一次，重启后可能再次发送。
 配置位于 `global.json` 的 `pushplus`。消息直接发送、不保存；网络或服务端临时故障最多尝试 3 次，间隔 1、2 秒，配置错误不重试。
 最终发送失败仅记录日志，不影响交易结果；超时重试可能重复送达。
 

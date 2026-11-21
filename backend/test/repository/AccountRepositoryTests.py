@@ -5,15 +5,15 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from market_trading_bot.service.AccountService import AccountService
-from PapFixture import PapFixture
 from pathlib import Path
+from TradeExecutorFixture import TradeExecutorFixture
 from unittest.mock import Mock, patch
 
 
-class PapAccountRepositoryTests(PapFixture, unittest.TestCase):
+class AccountRepositoryTests(TradeExecutorFixture, unittest.TestCase):
     def test_restore_sell_before_buy_and_t_plus_zero(self):
         self.rebalance(self.signal(), self.executor, 10000)
-        restored = AccountService(self.root, 'pap')
+        restored = AccountService(self.root, 'TradeExecutor')
         result = self.rebalance(self.signal(day=23, winner='B'), self.executor, 999999, repository=restored)
         self.assertEqual([fill['side'] for fill in result['fills']], ['sell', 'buy'])
         self.assertNotIn('A', result['positions'])

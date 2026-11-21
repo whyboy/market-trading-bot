@@ -24,7 +24,7 @@ class DailyAccountReportTests(unittest.TestCase):
 
     def build(self, summary):
         return DailyAccountReport.build(date(2026, 11, 20), [
-            {'strategy_id': 'etf_rotation', 'instance_id': 'pap', 'summary': summary}])
+            {'strategy_id': 'etf_rotation', 'instance_id': 'TradeExecutor', 'summary': summary}])
 
     def test_multiple_accounts_are_grouped_by_strategy_in_one_message(self):
         summaries = [{'strategy_id': 'rotation', 'instance_id': 'first', 'summary': self.summary()},

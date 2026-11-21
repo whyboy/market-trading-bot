@@ -8,6 +8,7 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from market_trading_bot import app as app_module
+from market_trading_bot.market.AKShareMarket import SHANGHAI
 from market_trading_bot.task.TradingTask import TradingTask
 from market_trading_bot.TaskScheduler import TaskScheduler
 from pathlib import Path
@@ -20,15 +21,20 @@ class AppTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         (self.root / 'market_trading_bot/config').mkdir(parents=True)
         (self.root / 'market_trading_bot/config/global.json').write_text(json.dumps({
-            'pushplus': {'token': 'test-token'},
+            'pushplus': {'token': 'test-token'}, 'market': {'provider': 'akshare_eastmoney',
+                'max_quote_age_seconds': 60, 'history_lookback_days': 60,
+                'request_timeout_seconds': 15, 'request_interval_seconds': 0},
             'storage': {'data_dir': 'data'}, 'logging': {'directory': 'logs', 'level': 'INFO', 'retention_dates': 30}}))
         (self.root / 'market_trading_bot/config/example_strategy.json').write_text(json.dumps({
             'strategy': 'example', 'schedule': {'trade_time': '14:30'}, 'instances': [{'id': 'example_pap', 'mode': 'pap', 'enabled': False}]}))
         self.patch = patch.object(app_module, 'ROOT', self.root)
         self.patch.start()
         self.client = TestClient(app_module.app)
-        self.clock_patch = patch.object(TaskScheduler, 'now', return_value=datetime.now().replace(hour=8, minute=0))
+        self.clock_patch = patch.object(TaskScheduler, 'now', return_value=datetime.now(SHANGHAI).replace(hour=8, minute=0))
         self.clock_patch.start()
+        self.calendar_patch = patch('market_trading_bot.TaskScheduler.AKShareMarket.trading_calendar',
+                                    side_effect=lambda: [TaskScheduler.now().date() - timedelta(days=1), TaskScheduler.now().date()])
+        self.calendar_patch.start()
         def build(scheduler, strategy_id, instance, scheduled_at):
             return TradingTask(Mock(), Mock(), Mock(), Mock(), strategy_id=strategy_id,
                                instance_id=instance['id'], initial_cash=100000, scheduled_at=scheduled_at, notifier=Mock())
@@ -36,6 +42,7 @@ class AppTests(unittest.TestCase):
         self.build_patch.start()
 
     def tearDown(self):
+        self.calendar_patch.stop()
         self.build_patch.stop()
         self.clock_patch.stop()
         self.patch.stop()
@@ -122,8 +129,8 @@ class AppTests(unittest.TestCase):
         with patch('market_trading_bot.task.TradingTask.TradingTask.trade', autospec=True, side_effect=trade):
             with TestClient(app_module.app) as client:
                 scheduler = app_module.app.state.scheduler
-                scheduler.calendar_day = scheduler.now().date()
-                scheduler.is_trading_day = True
+                scheduler.calendar_context = {'day': scheduler.now().date(), 'is_trading_day': True,
+                                              'previous_trading_day': scheduler.now().date() - timedelta(days=1)}
                 scheduler._start_trades('example', scheduler.now().date())
                 try:
                     self.assertTrue(entered.wait(2))
@@ -169,8 +176,8 @@ class AppTests(unittest.TestCase):
         with patch('market_trading_bot.task.TradingTask.TradingTask.trade', autospec=True, side_effect=trade):
             with TestClient(app_module.app):
                 scheduler = app_module.app.state.scheduler
-                scheduler.calendar_day = scheduler.now().date()
-                scheduler.is_trading_day = True
+                scheduler.calendar_context = {'day': scheduler.now().date(), 'is_trading_day': True,
+                                              'previous_trading_day': scheduler.now().date() - timedelta(days=1)}
                 scheduler._start_trades('example', scheduler.now().date())
                 try:
                     self.assertTrue(entered.wait(2))
