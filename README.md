@@ -199,14 +199,14 @@ curl -f http://127.0.0.1:18080/api/strategies
 ```
 
 镜像构建时编译前端，运行时由单个 Python 服务提供页面、API 和定时模拟交易。
-默认仅绑定本机 `127.0.0.1:18080`，可用 `deploy/nginx.conf` 将 Nginx 的 `8000` 端口代理到该服务。
-安装 Nginx 配置前，应先备份并确认现有 `8000` 站点可以被替换，执行 `nginx -t` 后再 reload。
-Azure 网络安全组开放 TCP `8000` 后，通过 `http://<服务器公网IP>:8000` 访问。
+默认仅绑定本机 `127.0.0.1:18080`，可用 `deploy/nginx.conf` 将 Nginx 的 `8080` 端口代理到该服务。
+安装 Nginx 配置前，应先备份并确认现有 `8080` 站点可以被替换，执行 `nginx -t` 后再 reload。
+Azure 网络安全组开放 TCP `8080` 后，通过 `http://<服务器公网IP>:8080` 访问。
 
-如果服务器没有其他服务占用 `8000`，也可以直接公开容器端口：
+如果服务器没有其他服务占用 `8080`，也可以直接公开容器端口：
 
 ```bash
-TRADING_BIND_ADDRESS=0.0.0.0 TRADING_PORT=8000 docker compose up -d --build
+TRADING_BIND_ADDRESS=0.0.0.0 TRADING_PORT=8080 docker compose up -d --build
 ```
 
 配置目录以只读方式挂载，修改配置后执行 `docker compose restart trading` 生效。
