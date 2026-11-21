@@ -1,6 +1,6 @@
 """模拟账户核心测试使用的共同数据。"""
 from datetime import datetime, timedelta
-from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
+from market_trading_bot.service.AccountService import AccountService
 from market_trading_bot.strategy.StrategyData import RankedETF, StrategyData
 from market_trading_bot.task.TradingTask import TradingTask
 from market_trading_bot.trader.PapTrader import PapTrader
@@ -19,7 +19,7 @@ class PapFixture:
                       'B': {'lot_size': 100, 't_plus_one': False}}
         self.executor = PapTrader({'commission_rate': .0002, 'minimum_commission': 5,
                                        'slippage_rate': 0}, self.rules)
-        self.account_store = PapAccountRepository(self.root, 'pap')
+        self.account_store = AccountService(self.root, 'pap')
 
     def signal(self, day=20, winner='A', weight=1, prices=(10, 20)):
         now = datetime(2026, 11, day, 14, 30, tzinfo=ZoneInfo('Asia/Shanghai'))
@@ -32,7 +32,7 @@ class PapFixture:
         strategy.calculate.return_value = signal
         market = Mock()
         market.load.return_value = (signal.as_of, {})
-        return TradingTask(strategy, market, executor or self.executor, repository or self.account_store, Mock(),
+        return TradingTask(strategy, market, executor or self.executor, repository or self.account_store,
                            strategy_id='etf_rotation', instance_id='pap', initial_cash=initial_cash,
                            scheduled_at=signal.as_of, notifier=Mock())
 
