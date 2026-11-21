@@ -257,7 +257,7 @@ class TaskScheduler:
             account_store=PapAccountRepository(data_dir, instance['id'], strategy_id),
             status_store=TaskStatusRepository(data_dir, strategy_id, instance['id']),
             strategy_id=strategy_id, instance_id=instance['id'], initial_cash=instance['initial_cash'],
-            scheduled_at=scheduled_at, notifier=self.notifier, test_mode=self.test_mode,
+            scheduled_at=scheduled_at, notifier=self.notifier,
             trade_timeout_seconds=self.settings.get('runtime', {}).get('trade_timeout_seconds', 300),
             log_context=strategy_logging(self.root, strategy_id, self.settings['logging']))
 

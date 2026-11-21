@@ -22,7 +22,7 @@ class PushPlusTests(unittest.TestCase):
 
     def task(self):
         return SimpleNamespace(
-            strategy_id='etf_rotation', instance_id='pap', test_mode=False,
+            strategy_id='etf_rotation', instance_id='pap',
             scheduled_at=datetime(2026, 11, 20, 14, 30, tzinfo=SHANGHAI),
             result={'success': True, 'finished_at': '2026-11-20T14:31:00+08:00'},
             output={'date': '2026-11-20', 'signal': {'as_of': '2026-11-20T14:30:00+08:00'},

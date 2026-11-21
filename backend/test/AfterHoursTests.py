@@ -89,10 +89,10 @@ class AfterHoursTests(unittest.TestCase):
             self.assertTrue(status['last_execution']['success'])
             days = client.get('/api/strategies/etf_rotation/logs').json()
             log = client.get(f'/api/strategies/etf_rotation/logs/{days[0]}').json()['content']
-            for text in ('test_mode=True', '链路测试模式', '行情日期=2026-11-20', '策略计算完成', '任务完成'):
+            for text in ('任务开始', '链路测试模式', '行情日期=2026-11-20', '策略计算完成', '任务完成'):
                 self.assertIn(text, log)
-            self.assertIn('【链路测试】', self.send.call_args.args[0])
-            self.assertIn('测试行情时间：2026-11-20', self.send.call_args.args[1])
+            self.assertEqual(self.send.call_args.args[0], 'etf_rotation｜模拟交易完成')
+            self.assertIn('成交：', self.send.call_args.args[1])
             database = self.root / 'data/test/etf_rotation_pap/ledger.sqlite3'
             with sqlite3.connect(database) as connection:
                 self.assertEqual(connection.execute('SELECT day FROM daily_results').fetchone()[0], '2026-11-21')
