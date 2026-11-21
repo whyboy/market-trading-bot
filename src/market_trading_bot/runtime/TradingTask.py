@@ -9,7 +9,7 @@ from datetime import datetime, time
 from market_trading_bot.AKShareMarket import AKShareMarket, SHANGHAI
 from market_trading_bot.PapAccountStore import PapAccountStore
 from market_trading_bot.PapExecutor import PapExecutor
-from market_trading_bot.strategies.ETFRotationStrategy import ETFRotationStrategy
+from market_trading_bot.strategies.ETFRotationStrategyImpl import ETFRotationStrategyImpl
 from market_trading_bot.StrategyLogger import strategy_logging
 from pathlib import Path
 
@@ -102,7 +102,7 @@ class TradingTask:
                 if completed:
                     logger.info('跳过重复调仓 instance=%s date=%s', instance_id, completed['date'])
                     return self._pap_output(account_store, completed, logger)
-                strategy = ETFRotationStrategy(configuration['parameters'])
+                strategy = ETFRotationStrategyImpl(configuration['parameters'])
                 market = AKShareMarket(settings['market'], logger=logger)
                 as_of, snapshots = market.load(strategy.symbols, strategy.history_points)
                 logger.info('策略计算开始 symbols=%s', ','.join(strategy.symbols))

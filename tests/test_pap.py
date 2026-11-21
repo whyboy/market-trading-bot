@@ -219,7 +219,7 @@ class PapTests(unittest.TestCase):
         path.write_text(json.dumps(config))
         with patch('market_trading_bot.runtime.TradingTask.strategy_logging'), \
                 patch('market_trading_bot.runtime.TradingTask.datetime') as clock, \
-                patch('market_trading_bot.runtime.TradingTask.ETFRotationStrategy') as strategy, \
+                patch('market_trading_bot.runtime.TradingTask.ETFRotationStrategyImpl') as strategy, \
                 patch('market_trading_bot.runtime.TradingTask.AKShareMarket') as market:
             clock.now.return_value = self.signal().as_of
             strategy.return_value.calculate.return_value = self.signal()

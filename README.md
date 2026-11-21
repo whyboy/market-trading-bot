@@ -25,7 +25,7 @@ market-trading-bot/
 │   ├── runtime/                    # 交易日调度、后台线程和运行记录
 │   ├── web/app.py                  # 网页与只读API，后端端口8001
 │   ├── strategies/
-│   │   └── ETFRotationStrategy.py  # ETF 动量轮动策略
+│   │   └── ETFRotationStrategyImpl.py  # ETF 动量轮动策略
 │   ├── AKShareMarket.py            # 行情与交易日历
 │   ├── PapExecutor.py              # 模拟成交
 │   ├── PapAccountStore.py          # SQLite 账本与 CSV 导出

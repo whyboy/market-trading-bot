@@ -5,7 +5,7 @@ from ..models import MarketSnapshot, RankedETF, StrategyResult
 from datetime import datetime
 
 
-class ETFRotationStrategy:
+class ETFRotationStrategyImpl:
     """按加权动量选取一只 ETF，再按目标年化波动率计算仓位。"""
 
     def __init__(self, parameters: dict):
