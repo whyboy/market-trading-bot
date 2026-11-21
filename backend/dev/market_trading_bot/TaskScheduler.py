@@ -26,7 +26,7 @@ class TaskScheduler:
         self.tasks = {}  # (策略ID, 账户ID) -> 最近一次任务（可能已完成）
         self.configs = {}
         self.calendar_day = None
-        self.prepared_day = None
+        self.calendar_prepared_date = None
         self.is_trading_day = None
         self.calendar_error = None
         self.calendar_lock = threading.RLock()
@@ -87,22 +87,22 @@ class TaskScheduler:
         if not self.configs or not self.calendar_lock.acquire(blocking=False):
             return
         try:
-            day = self.now().date()
-            if self.prepared_day == day:
+            today = self.now().date()
+            if self.calendar_prepared_date == today:
                 return
-            context = self._prepare_calendar(day, single_attempt=startup)
-            if context is None or self.stop_event.is_set() or self.now().date() != day:
-                if startup and not self.stop_event.is_set() and self.now().date() == day:
+            context = self._prepare_calendar(today, single_attempt=startup)
+            if context is None or self.stop_event.is_set() or self.now().date() != today:
+                if startup and not self.stop_event.is_set() and self.now().date() == today:
                     self.timer.add_job(self.prepare_calender_context, id='_startup_calendar_retry', replace_existing=True)
                 return
-            self.calendar_day = day
+            self.calendar_day = today
             self.is_trading_day = context['is_trading_day']
             if not self.is_trading_day:
-                self.prepared_day = day
-                logging.getLogger(__name__).info('%s 非交易日，不注册交易及每日任务', day)
+                self.calendar_prepared_date = today
+                logging.getLogger(__name__).info('%s 非交易日，不注册交易及每日任务', today)
                 return
-            self._register_daily_tasks(day)
-            self.prepared_day = day
+            self._register_daily_tasks(today)
+            self.calendar_prepared_date = today
         finally:
             self.calendar_lock.release()
 
