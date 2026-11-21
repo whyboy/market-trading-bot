@@ -57,26 +57,26 @@ class DailyAccountService:
             return {'date': day.isoformat(), 'notice': '账户尚未开户，暂无持仓和收益数据。'}
         trading = day in calendar
         if not trading:
-            previous = self.valuations.latest(instance_id, day.isoformat())
+            previous = self.valuations.find_latest_on_or_before(instance_id, day.isoformat())
             if previous is None:
                 close_day = max(value for value in calendar if value < day)
                 account = PapAccountRepository.get_account_snapshot_on_or_before(self.directory, instance_id, close_day.isoformat())
                 if not account['initialized']:
                     return {'date': day.isoformat(), 'notice': '今日休市，尚无有效收盘估值。'}
-                previous = self.valuations.save(instance_id, self._valuation(market, account, close_day))
+                previous = self.valuations.save_if_absent(instance_id, self._valuation(market, account, close_day))
             return {**previous, 'date': day.isoformat(), 'is_trading_day': False}
-        snapshot = self.valuations.latest(instance_id, day.isoformat())
+        snapshot = self.valuations.find_latest_on_or_before(instance_id, day.isoformat())
         if snapshot is None or snapshot['date'] != day.isoformat():
             snapshot = self._valuation(market, account, day)
             if self.is_running(strategy_id, instance_id):
                 raise RuntimeError('交易任务仍在运行')
-            snapshot = self.valuations.save(instance_id, snapshot)
+            snapshot = self.valuations.save_if_absent(instance_id, snapshot)
         previous_day = max(value for value in calendar if value < day)
-        previous = self.valuations.latest(instance_id, previous_day.isoformat())
+        previous = self.valuations.find_latest_on_or_before(instance_id, previous_day.isoformat())
         if previous is None or previous['date'] != previous_day.isoformat():
             previous_account = PapAccountRepository.get_account_snapshot_on_or_before(self.directory, instance_id, previous_day.isoformat())
             if previous_account['initialized']:
-                previous = self.valuations.save(instance_id, self._valuation(market, previous_account, previous_day))
+                previous = self.valuations.save_if_absent(instance_id, self._valuation(market, previous_account, previous_day))
             else:
                 previous = {'equity': account['initial_cash'], 'date': '开户资金'}
         baseline = Decimal(previous['equity'])

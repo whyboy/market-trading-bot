@@ -53,7 +53,7 @@ class DailyAccountServiceTests(unittest.TestCase):
         self.assertEqual(summary['comparison_date'], '开户资金')
         self.assertEqual(summary['buy_count'], 1)
         self.assertEqual(repository.database.read_bytes(), before)
-        snapshot = self.service.valuations.latest('pap', self.day.isoformat())
+        snapshot = self.service.valuations.find_latest_on_or_before('pap', self.day.isoformat())
         self.assertEqual(snapshot['equity'], summary['equity'])
 
     def test_missing_prior_valuation_is_rebuilt_from_historical_holdings(self):
@@ -62,13 +62,13 @@ class DailyAccountServiceTests(unittest.TestCase):
         summary = self.summary()
         self.assertEqual(summary['comparison_date'], '2026-11-19')
         self.assertEqual(summary['daily_pnl'], '995.00')
-        previous = self.service.valuations.latest('pap', '2026-11-19')
+        previous = self.service.valuations.find_latest_on_or_before('pap', '2026-11-19')
         self.assertEqual(previous['equity'], '100000.00')
         self.assertEqual(previous['positions']['510300.XSHG']['quantity'], 100)
 
     def test_existing_previous_close_is_used_without_fetching_it_again(self):
         self.save_account(self.day)
-        self.service.valuations.save('pap', {'date': '2026-11-19', 'equity': '100500'})
+        self.service.valuations.save_if_absent('pap', {'date': '2026-11-19', 'equity': '100500'})
         summary = self.summary()
         self.assertEqual(summary['daily_pnl'], '495.00')
         self.market.closing_prices.assert_called_once()
@@ -122,7 +122,7 @@ class DailyAccountServiceTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertIn('估值失败', calls[0].args[2]['notice'])
         self.assertIn('尚未开户', calls[1].args[2]['notice'])
-        self.assertIsNone(self.service.valuations.latest('pap', self.day.isoformat()))
+        self.assertIsNone(self.service.valuations.find_latest_on_or_before('pap', self.day.isoformat()))
 
     def test_delayed_close_retries_and_succeeds(self):
         self.save_account(self.day)

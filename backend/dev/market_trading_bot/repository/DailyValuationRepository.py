@@ -13,14 +13,14 @@ class DailyValuationRepository:
                 instance_id TEXT NOT NULL, day TEXT NOT NULL, payload TEXT NOT NULL,
                 PRIMARY KEY (instance_id, day))''')
 
-    def latest(self, instance_id, day):
+    def find_latest_on_or_before(self, instance_id, day):
         with closing(sqlite3.connect(self.database, timeout=10)) as connection:
             row = connection.execute('''SELECT payload FROM valuations
                 WHERE instance_id=? AND day<=? ORDER BY day DESC LIMIT 1''', (instance_id, day)).fetchone()
         return json.loads(row[0]) if row else None
 
-    def save(self, instance_id, snapshot):
+    def save_if_absent(self, instance_id, snapshot):
         with closing(sqlite3.connect(self.database, timeout=10)) as connection, connection:
             connection.execute('INSERT OR IGNORE INTO valuations VALUES (?, ?, ?)',
                                (instance_id, snapshot['date'], json.dumps(snapshot, ensure_ascii=False, allow_nan=False)))
-        return self.latest(instance_id, snapshot['date'])
+        return self.find_latest_on_or_before(instance_id, snapshot['date'])
