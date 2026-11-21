@@ -13,7 +13,7 @@ from market_trading_bot.market.AKShareMarket import SHANGHAI
 class TradingTask:
     """协调策略、行情、模拟交易和记账。"""
 
-    def __init__(self, strategy, market, executor, account_store, status_store, *,
+    def __init__(self, strategy, market, executor, account_store, *,
                  strategy_id, instance_id, initial_cash, scheduled_at, notifier, trade_timeout_seconds=300,
                  log_context=None):
         """创建交易线程；scheduled_at 决定记账日期，超时仅用于监控。"""
@@ -21,7 +21,6 @@ class TradingTask:
         self.market = market
         self.executor = executor
         self.account_store = account_store
-        self.status_store = status_store
         self.strategy_id = strategy_id
         self.instance_id = instance_id
         self.initial_cash = initial_cash
@@ -113,9 +112,8 @@ class TradingTask:
         return result
 
     def _heartbeat(self):
-        """更新并保存交易任务心跳。"""
+        """更新交易任务的内存心跳。"""
         self.status['heartbeat_at'] = self.now().isoformat()
-        self.status_store.write(self.status)
 
     @staticmethod
     def now():

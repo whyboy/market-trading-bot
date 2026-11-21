@@ -33,7 +33,6 @@ market-trading-bot/
 │   │       │   ├── ETFRotationStrategyImpl.py
 │   │       │   └── StrategyData.py          # StrategyData、RankedETF
 │   │       ├── repository/                # 数据库访问
-│   │       │   ├── TaskStatusRepository.py
 │   │       │   └── PapAccountRepository.py
 │   │       ├── log/StrategyLogger.py      # 日志处理代码
 │   │       ├── market/                    # 行情适配及数据
@@ -142,7 +141,7 @@ backend/.venv/bin/python backend/main.py
 - 9:00 后启动服务会立即补做当天的交易日判断，只安排尚未到时间的策略，不补执行已错过的任务。
 - `enable` 默认为 `true`，设为 `false` 不安排该策略。到点为每个启用的策略账户创建独立 `TradingTask` 线程，完成后退出。
 - 一个策略＋一个账户对应一个 Task；账户间独立执行，同一账户不重叠。调度器为每个 Task 构建独立策略、行情、模拟执行器及 Repository 对象，Task 不读取配置、不构建业务依赖。
-- 任务状态存储在 `backend/dev/data/runtime/<strategy>/<instance_id>/runtime.sqlite3`，页面显示当日计划执行时间、最近执行结果和交易日判断状态。配置修改后重启生效。
+- 任务状态保存在内存中，页面显示当日计划执行时间、最近执行结果和交易日判断状态；服务重启后任务状态重置。配置修改后重启生效。
 
 交易执行依赖关系：
 
@@ -150,8 +149,7 @@ backend/.venv/bin/python backend/main.py
 TaskScheduler → TradingTask（绑定策略＋账户）
                     ├── Market → MarketData → Strategy → StrategyData
                     ├── PapTrader：纯内存模拟调仓
-                    ├── PapAccountRepository：账户事务与CSV导出
-                    └── TaskStatusRepository：该账户任务状态
+                    └── PapAccountRepository：账户事务与CSV导出
 ```
 
 Repository 不依赖执行器。Task 在账户事务内读取最新快照、检查当日结果、调用执行器并保存；任一步失败整体回滚，保证并发防重复与资金一致性。

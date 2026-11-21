@@ -63,7 +63,7 @@ class PushPlusTests(unittest.TestCase):
 
     def test_notification_failure_does_not_change_successful_trade(self):
         notifier = PushPlusNotifier(self.settings)
-        task = TradingTask(Mock(), Mock(), Mock(), Mock(), Mock(), strategy_id='example',
+        task = TradingTask(Mock(), Mock(), Mock(), Mock(), strategy_id='example',
                            instance_id='pap', initial_cash=100000,
                            scheduled_at=datetime(2026, 11, 20, 14, 30, tzinfo=SHANGHAI), notifier=notifier)
         with patch.object(task, 'trade', return_value={'fills': []}) as trade:
@@ -78,7 +78,7 @@ class PushPlusTests(unittest.TestCase):
 
     def test_failed_trade_sends_failure_report(self):
         notifier = PushPlusNotifier(self.settings)
-        task = TradingTask(Mock(), Mock(), Mock(), Mock(), Mock(), strategy_id='example',
+        task = TradingTask(Mock(), Mock(), Mock(), Mock(), strategy_id='example',
                            instance_id='pap', initial_cash=100000,
                            scheduled_at=datetime(2026, 11, 20, 14, 30, tzinfo=SHANGHAI), notifier=notifier)
         with patch.object(task, 'trade', side_effect=ValueError('bad market data')):
