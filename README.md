@@ -42,8 +42,12 @@ market-trading-bot/
 │   │       │   └── DailyResultsService.py
 │   │       ├── log/StrategyLogger.py      # 日志处理代码
 │   │       ├── market/                    # 行情适配及数据
-│   │       │   ├── AKShareMarket.py
-│   │       │   └── MarketData.py            # MarketData、DailyClose
+│   │       │   ├── MarketData.py            # MarketData、DailyClose
+│   │       │   ├── MarketProvider.py
+│   │       │   └── source/                  # 各行情数据源
+│   │       │       ├── AKShareMarket.py
+│   │       │       ├── BaoStockDaily.py
+│   │       │       └── HttpMarket.py
 │   │       ├── trading/TradeExecutor.py
 │   │       └── app.py
 │   └── test/                              # 核心测试，不与源码包同名

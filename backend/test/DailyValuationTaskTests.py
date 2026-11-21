@@ -4,7 +4,7 @@ import threading
 import unittest
 from datetime import date, datetime
 from decimal import Decimal
-from market_trading_bot.market.AKShareMarket import SHANGHAI
+from market_trading_bot.market.source.AKShareMarket import SHANGHAI
 from market_trading_bot.notification.PushPlusNotifier import PushPlusNotifier
 from market_trading_bot.service.AccountService import AccountService
 from market_trading_bot.service.DailyResultsService import DailyResultsService

@@ -6,13 +6,13 @@ import pandas as pd
 import tempfile
 import unittest
 from datetime import datetime, timedelta
-from market_trading_bot.market.AKShareMarket import AKShareMarket, SHANGHAI
+from market_trading_bot.market.source.AKShareMarket import AKShareMarket, SHANGHAI
 from market_trading_bot.TaskScheduler import TaskScheduler
 from pathlib import Path
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1] / 'dev'
-MARKET = importlib.import_module('market_trading_bot.market.AKShareMarket')
+MARKET = importlib.import_module('market_trading_bot.market.source.AKShareMarket')
 
 
 class AfterHoursTradingTests(unittest.TestCase):

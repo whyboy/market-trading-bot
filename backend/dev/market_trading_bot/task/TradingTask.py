@@ -7,7 +7,7 @@ import uuid
 from contextlib import nullcontext
 from dataclasses import asdict
 from datetime import datetime
-from market_trading_bot.market.AKShareMarket import SHANGHAI
+from market_trading_bot.market.source.AKShareMarket import SHANGHAI
 
 
 class TradingTask:

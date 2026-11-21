@@ -3,7 +3,7 @@ import logging
 import threading
 from datetime import datetime, time
 from decimal import Decimal, ROUND_HALF_UP
-from market_trading_bot.market.AKShareMarket import AKShareMarket, SHANGHAI
+from market_trading_bot.market.source.AKShareMarket import AKShareMarket, SHANGHAI
 from market_trading_bot.service.AccountService import AccountService
 from market_trading_bot.service.DailyResultsService import DailyResultsService
 

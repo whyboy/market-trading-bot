@@ -4,7 +4,7 @@ import tempfile
 import threading
 import unittest
 from datetime import date, datetime, timedelta, timezone
-from market_trading_bot.market.AKShareMarket import SHANGHAI
+from market_trading_bot.market.source.AKShareMarket import SHANGHAI
 from market_trading_bot.task.TradingTask import TradingTask
 from market_trading_bot.TaskScheduler import TaskScheduler
 from pathlib import Path

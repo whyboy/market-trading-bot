@@ -3,7 +3,7 @@ import pandas as pd
 import unittest
 from datetime import date
 from decimal import Decimal
-from market_trading_bot.market.AKShareMarket import AKShareMarket, MarketDataError
+from market_trading_bot.market.source.AKShareMarket import AKShareMarket, MarketDataError
 from MarketFixture import MarketFixture
 from unittest.mock import patch
 

@@ -4,14 +4,14 @@ import json
 import math
 import pandas as pd
 from datetime import datetime, timedelta
-from market_trading_bot.market.AKShareMarket import AKShareMarket
+from market_trading_bot.market.source.AKShareMarket import AKShareMarket
 from market_trading_bot.strategy.ETFRotationStrategyImpl import ETFRotationStrategyImpl
 from pathlib import Path
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1] / 'dev'
-MARKET_MODULE = importlib.import_module('market_trading_bot.market.AKShareMarket')
+MARKET_MODULE = importlib.import_module('market_trading_bot.market.source.AKShareMarket')
 NOW = datetime(2026, 11, 20, 14, 30, tzinfo=ZoneInfo('Asia/Shanghai'))
 
 
