@@ -14,7 +14,7 @@ class MarketProvider:
 
     def get_quotes(self, symbols, now, max_age):
         errors = []
-        for provider in ('sina', 'tencent'):
+        for provider in ('tencent', 'sina'):
             try:
                 quotes = self.http.get_quotes(symbols, provider)
                 observed_at = now()

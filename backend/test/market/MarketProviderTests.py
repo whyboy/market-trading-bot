@@ -19,14 +19,21 @@ class MarketProviderTests(unittest.TestCase):
                                        [date(2026, 11, 20)]), expected)
         fetch.assert_called_once_with('159915.XSHE', '2026-11-01', '2026-11-20', 'qfq', 'tencent')
 
-    def test_sina_failure_uses_tencent_quote(self):
-        fields = ['0'] * 31
-        fields[2], fields[3], fields[30] = '159915', '2.230', '20261120143000'
-        response = Mock(text=f'v_sz159915="{"~".join(fields)}";')
+    def test_tencent_failure_uses_sina_quote(self):
+        fields = ['0'] * 32
+        fields[3], fields[30], fields[31] = '2.230', '2026-11-20', '14:30:00'
+        response = Mock(text=f'var hq_str_sz159915="{",".join(fields)}";')
         now = datetime(2026, 11, 20, 14, 30, 10, tzinfo=ZoneInfo('Asia/Shanghai'))
         source = MarketProvider(15)
         with patch('market_trading_bot.market.source.HttpMarket.requests.get', side_effect=[Mock(text=''), response]):
             self.assertEqual(source.get_quotes(['159915.XSHE'], lambda: now, 60)['159915.XSHE'][0], 2.23)
+
+    def test_tencent_quote_is_preferred(self):
+        now = datetime(2026, 11, 20, 14, 30, 10, tzinfo=ZoneInfo('Asia/Shanghai'))
+        source = MarketProvider(15)
+        with patch.object(source.http, 'get_quotes', return_value={'159915.XSHE': (2.23, now)}) as get_quotes:
+            source.get_quotes(['159915.XSHE'], lambda: now, 60)
+        get_quotes.assert_called_once_with(['159915.XSHE'], 'tencent')
 
     def test_sina_quote_time(self):
         fields = ['0'] * 32
