@@ -78,7 +78,7 @@ backend/.venv/bin/python backend/main.py
 | `storage.data_dir` | SQLite 账本与 CSV 目录 |
 | `logging` | 日志目录、级别和保留日期数 |
 | `runtime.trade_timeout_seconds` | 交易执行超时阈值，默认 300 秒，仅标记异常 |
-| `pushplus` | 预留配置，当前不发送推送 |
+| `pushplus.enabled` | 是否启用执行报告推送，默认关闭；Token 使用环境变量 `PUSHPLUS_TOKEN` |
 
 策略配置位于 `backend/dev/market_trading_bot/config/etf_rotation_strategy.json`：
 
@@ -206,6 +206,24 @@ Azure 网络安全组放行 TCP `8080` 后，访问 `http://<服务器公网IP>:
 - 运维：容器以非 root 用户运行，自动重启并轮转容器日志；只运行一个实例。
 - 排查：`docker compose logs --tail=100 -f trading` 查看日志，`/api/runtime` 查看调度与交易状态；容器健康检查仅验证 API 响应。
 - 停止：执行 `docker compose down`。停止或更新时最多等待 2 分钟，超时会强制结束进程，宜在无交易任务运行时操作。
+
+### 微信执行报告（PushPlus）
+
+1. 在 [PushPlus](https://www.pushplus.plus/push1.html) 登录、关注微信服务号并完成实名认证。
+2. 创建专用消息 Token，在网页“试一试”中选择微信渠道，确认能收到消息。
+3. 在项目根目录的 `.env` 文件中配置 `PUSHPLUS_TOKEN=你的消息Token`（文件已被 Git 和 Docker 构建忽略，勿提交凭据）。
+4. 将 `backend/dev/market_trading_bot/config/global.json` 中的 `pushplus.enabled` 设为 `true`，执行 `docker compose up -d --build`。
+
+本地运行时需自行设置 `PUSHPLUS_TOKEN` 环境变量，Python 不自动加载 `.env`。
+后续修改 `.env` 后执行 `docker compose up -d` 重建容器，单纯 restart 不会更新容器环境变量。
+
+每个账户在策略执行结束后发送一份模拟交易报告，无成交也发送；包括成交、持仓、执行时资产及累计收益，失败则提示查看日志。
+累计收益以账本实际开户资金为基准，包含交易费用；不是收盘收益。休市日不执行策略，本阶段不发送休市通知或 15:05 日报。
+
+报告保存在数据卷的 `runtime/notifications.sqlite3`，每 5 秒处理一条，网络或服务端临时故障最多尝试 3 次，间隔为 60、120 秒；配置错误不重试。
+按策略、账户、计划日期和消息类型去重，重启不会重置发送次数；接口受理成功不等于微信已送达，网络超时后重试可能重复送达。
+交易账本与通知独立提交，推送失败不会回滚或重跑交易；进程在账本提交后、消息入队前崩溃时，可能漏报。
+Token 缺失时记录错误并停用通知，交易继续运行。使用 `docker compose logs --tail=100 trading` 排查推送异常。
 
 ### API
 

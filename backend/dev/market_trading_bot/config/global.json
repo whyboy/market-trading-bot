@@ -11,9 +11,7 @@
     "data_dir": "data"
   },
   "pushplus": {
-    "enabled": false,
-    "token": "",
-    "image_provider": null
+    "enabled": false
   },
   "logging": {
     "directory": "logs",
