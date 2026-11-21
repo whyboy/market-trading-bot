@@ -7,6 +7,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime, time, timezone
 from market_trading_bot.log.StrategyLogger import strategy_logging
 from market_trading_bot.market.AKShareMarket import AKShareMarket, SHANGHAI
+from market_trading_bot.notification.DailyAccountService import DailyAccountService
 from market_trading_bot.notification.PushPlusNotifier import PushPlusNotifier
 from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
 from market_trading_bot.repository.TaskStatusRepository import TaskStatusRepository
@@ -23,7 +24,8 @@ class TradingScheduler:
     1. 加载 enable=true（默认值）的策略配置，每天北京时间9:00确认交易日。
     2. 日历加载失败时每5秒重试，直到成功、停止服务或当天15:00。
     3. 仅为交易日中尚未到执行时间的策略注册当天任务；9:00后启动会补做判断。
-    4. 到点创建一次性 TradingTask 线程；一个策略账户对应一个线程，同账户不重叠，各账户可并行执行。
+    4. 每天15:05发送各账户收益日报，休市日展示最近有效估值；晚启动补发当天日报。
+    5. 到点创建一次性 TradingTask 线程；一个策略账户对应一个线程，同账户不重叠，各账户可并行执行。
 
     策略计算、模拟成交及账户记账由 TradingTask 协调，本类负责调度与生命周期。
     对外提供调度服务心跳、交易日判断结果、策略计划和最近任务状态，供网页监控。
@@ -39,6 +41,8 @@ class TradingScheduler:
         self.is_trading_day = None
         self.calendar_error = None
         self.calendar_guard = threading.Lock()
+        self.daily_guard = threading.Lock()
+        self.reported_day = None
         self.jobs = {}  # 策略ID -> 当天注册的定时回调，与实际交易线程区分
         self.timer = BackgroundScheduler(timezone=SHANGHAI)
         self.stop_event = threading.Event()
@@ -71,12 +75,18 @@ class TradingScheduler:
                     strategy_id = config['strategy']
                     self.configs[strategy_id] = config
                     self.paths[strategy_id] = path
+            self.daily_reports = DailyAccountService(self.root, self.settings, self.configs, self.notifier,
+                                                     self.stop_event, self._is_task_running, self.now)
+            self.timer.add_job(self.send_daily_reports, 'cron', hour=15, minute=5, id='_daily_report',
+                               coalesce=True, max_instances=1, misfire_grace_time=None)
             self.timer.add_job(self.prepare_day, 'cron', hour=9, minute=0, id='_calendar',
                                coalesce=True, max_instances=1, misfire_grace_time=300)
             self.timer.add_job(self._heartbeat, 'interval', seconds=5, id='_heartbeat')
             self.timer.start()
             if self.now().time() >= time(9):
                 self.timer.add_job(self.prepare_day, id='_startup_calendar')
+            if self.now().time() >= time(15, 5):
+                self.timer.add_job(self.send_daily_reports, id='_startup_daily_report')
         except BaseException:
             self.stop()
             raise
@@ -119,6 +129,24 @@ class TradingScheduler:
                         return
         finally:
             self.calendar_guard.release()
+
+    def send_daily_reports(self):
+        """每天北京时间15:05发送日报；当天晚启动补发，同一进程内不重复发送。"""
+        if not self.daily_guard.acquire(blocking=False):
+            return
+        try:
+            day = self.now().date()
+            if self.stop_event.is_set() or self.now().time() < time(15, 5) or self.reported_day == day:
+                return
+            if self.daily_reports.send_reports(day):
+                self.reported_day = day
+        finally:
+            self.daily_guard.release()
+
+    def _is_task_running(self, strategy_id, instance_id):
+        with self.guard:
+            task = self.tasks.get((strategy_id, instance_id))
+        return task is not None and task.thread.is_alive()
 
     def _start_task(self, path, day=None):
         """到点为每个启用账户创建Task；一个账户运行或装配失败不影响其他账户。"""

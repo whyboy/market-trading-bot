@@ -28,20 +28,35 @@ class PapAccountRepository:
     @staticmethod
     def latest(directory: Path, instance_id: str) -> dict:
         """只读查询最近账户快照；没有账本时不创建目录或账户。"""
+        snapshot = PapAccountRepository.snapshot(directory, instance_id, '9999-12-31')
+        if not snapshot['initialized']:
+            return snapshot
+        return {'initialized': True, 'date': snapshot['date'],
+                'as_of': snapshot.get('signal', {}).get('as_of'),
+                'cash': snapshot['cash'], 'equity': snapshot['equity'], 'positions': snapshot['positions'],
+                'initial_cash': snapshot['initial_cash']}
+
+    @staticmethod
+    def snapshot(directory: Path, instance_id: str, day: str) -> dict:
+        """只读取得指定日期及之前的最新完整账本，包含成交和实际开户资金。"""
         if not re.fullmatch(r'[A-Za-z0-9_-]+', instance_id):
             raise ValueError('实例ID只能包含字母、数字、下划线及连字符')
         database = (directory / instance_id / 'ledger.sqlite3').resolve()
         if not database.exists():
             return {'initialized': False}
-        with closing(sqlite3.connect(f'{database.as_uri()}?mode=ro', uri=True)) as connection:
-            row = connection.execute('SELECT payload FROM runs ORDER BY day DESC LIMIT 1').fetchone()
+        with closing(sqlite3.connect(f'{database.as_uri()}?mode=ro', uri=True)) as connection, connection:
+            connection.execute('BEGIN')
+            row = connection.execute('SELECT payload FROM runs WHERE day<=? ORDER BY day DESC LIMIT 1', (day,)).fetchone()
             if row is None:
                 return {'initialized': False}
-            latest = json.loads(row[0])
+            snapshot = json.loads(row[0])
             initial = connection.execute('SELECT initial_cash FROM account WHERE id=1').fetchone()
-        return {'initialized': True, 'date': latest['date'], 'as_of': latest.get('signal', {}).get('as_of'),
-                'cash': latest['cash'], 'equity': latest['equity'], 'positions': latest['positions'],
-                'initial_cash': initial[0] if initial else None}
+            if initial:
+                initial_cash = initial[0]
+            else:
+                first = json.loads(connection.execute('SELECT payload FROM runs ORDER BY day LIMIT 1').fetchone()[0])
+                initial_cash = str(PapAccountRepository._restore_initial_cash([first]))
+        return {**snapshot, 'initialized': True, 'initial_cash': initial_cash}
 
     def completed(self, day: str) -> dict | None:
         """读取指定日期已提交的结果；未运行返回 None。"""

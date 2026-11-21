@@ -245,3 +245,36 @@ class TradingSchedulerTests(unittest.TestCase):
     def test_factory_rejects_unsupported_execution_mode(self):
         with self.assertRaises(ValueError):
             self.scheduler._build_task('etf_rotation', {**self.config['instances'][0], 'mode': 'pro'}, DUE)
+
+    def test_daily_report_trigger_is_fifteen_oh_five_even_on_weekends(self):
+        trigger = self.scheduler.timer.get_job('_daily_report').trigger
+        due = DUE.replace(hour=15, minute=5)
+        self.assertEqual(trigger.get_next_fire_time(None, self.current), due)
+        self.assertEqual(trigger.get_next_fire_time(due, due + timedelta(seconds=1)), due + timedelta(days=1))
+
+    def test_daily_report_runs_once_per_day_and_releases_guard(self):
+        self.current = DUE.replace(hour=15, minute=5)
+        with patch.object(self.scheduler.daily_reports, 'send_reports', return_value=True) as send:
+            self.scheduler.send_daily_reports()
+            self.scheduler.send_daily_reports()
+            send.assert_called_once_with(self.current.date())
+            self.current += timedelta(days=1)
+            self.scheduler.send_daily_reports()
+        self.assertEqual(send.call_count, 2)
+
+    def test_stopped_daily_run_is_not_marked_complete(self):
+        self.current = DUE.replace(hour=15, minute=5)
+        with patch.object(self.scheduler.daily_reports, 'send_reports', return_value=False):
+            self.scheduler.send_daily_reports()
+        self.assertIsNone(self.scheduler.reported_day)
+
+    def test_start_after_fifteen_oh_five_schedules_same_day_report(self):
+        self.scheduler.stop()
+        self.current = DUE.replace(hour=16)
+        scheduler = TradingScheduler(self.root)
+        try:
+            with patch.object(scheduler.timer, 'start'), patch.object(scheduler.timer, 'add_job') as add_job:
+                scheduler.start()
+            self.assertTrue(any(call.kwargs.get('id') == '_startup_daily_report' for call in add_job.call_args_list))
+        finally:
+            scheduler.stop()

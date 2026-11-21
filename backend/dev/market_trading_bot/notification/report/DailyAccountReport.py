@@ -24,6 +24,9 @@ class DailyAccountReport:
     def build(strategy_id, instance_id, summary):
         title = f'{strategy_id}｜每日收益总结'
         lines = [f"日期：{summary['date']}", f'账户：{instance_id}']
+        if summary.get('notice'):
+            lines.append(summary['notice'])
+            return title, '\n'.join(lines)
         if not summary['is_trading_day']:
             lines.append('今日休市，以下为最近一次有效估值。')
         lines.extend([f"估值时间：{summary['as_of']}",
@@ -39,4 +42,6 @@ class DailyAccountReport:
                                       for symbol, position in sorted(summary['positions'].items())) or '空仓'))
         if summary['is_trading_day']:
             lines.append(f"今日交易：买入 {summary['buy_count']} 笔，卖出 {summary['sell_count']} 笔")
+        if summary.get('execution_note'):
+            lines.append(summary['execution_note'])
         return title, '\n'.join(lines)

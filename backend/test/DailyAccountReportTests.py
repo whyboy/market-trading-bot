@@ -46,3 +46,16 @@ class DailyAccountReportTests(unittest.TestCase):
         with patch.object(notifier.client, 'send', return_value='receipt') as send:
             notifier.send_daily_account_report('etf_rotation', 'pap', self.summary())
         send.assert_called_once_with(*DailyAccountReport.build('etf_rotation', 'pap', self.summary()))
+
+    def test_unavailable_valuation_only_shows_status_not_old_returns(self):
+        _, content = DailyAccountReport.build('etf_rotation', 'pap', {
+            'date': '2026-11-20', 'notice': '收盘估值失败，请查看日志。'})
+        self.assertIn('收盘估值失败', content)
+        self.assertNotIn('当日收益率', content)
+        self.assertNotIn('总资产', content)
+
+    def test_incomplete_execution_is_explicitly_labelled(self):
+        summary = self.summary()
+        summary['execution_note'] = '今日策略未完成记账，按现有持仓估值。'
+        _, content = DailyAccountReport.build('etf_rotation', 'pap', summary)
+        self.assertIn('未完成记账', content)

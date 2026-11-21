@@ -8,6 +8,7 @@ import requests
 import time as clock
 from akshare.utils.context import config as ak_config
 from datetime import datetime, time, timedelta
+from decimal import Decimal
 from market_trading_bot.data.MarketSnapshot import DailyClose, MarketSnapshot
 from zoneinfo import ZoneInfo
 
@@ -115,6 +116,25 @@ class AKShareMarket:
         except Exception as exc:
             self.logger.error('行情接口请求或解析失败: %s', exc)
             raise MarketDataError(f'行情获取失败: {exc}') from exc
+
+    def closing_prices(self, symbols, day):
+        """读取指定交易日不复权收盘价；拒绝缺失、重复、过期或非法价格。"""
+        prices = {}
+        for symbol in sorted(symbols):
+            if not re.fullmatch(r'\d{6}\.(XSHG|XSHE)', symbol):
+                raise MarketDataError(f'不支持的证券代码: {symbol}')
+            daily = self._request(ak.fund_etf_hist_em, symbol=symbol.split('.')[0], period='daily',
+                                  start_date=day.strftime('%Y%m%d'), end_date=day.strftime('%Y%m%d'), adjust='')
+            if daily.empty:
+                raise MarketDataError(f'{symbol}: {day} 收盘价尚未更新')
+            dates = pd.to_datetime(daily['日期'], errors='raise').dt.date
+            if len(daily) != 1 or dates.iloc[0] != day:
+                raise MarketDataError(f'{symbol}: 收盘价日期错误或重复')
+            price = Decimal(str(daily.iloc[0]['收盘']))
+            if not price.is_finite() or price <= 0:
+                raise MarketDataError(f'{symbol}: 收盘价无效')
+            prices[symbol] = price
+        return prices
 
     def trading_calendar(self):
         """获取完整交易日历，沿用行情请求超时和间隔配置。"""
