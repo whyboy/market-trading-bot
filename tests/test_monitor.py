@@ -26,8 +26,11 @@ class MonitorTests(unittest.TestCase):
         self.patch = patch.object(web, 'ROOT', self.root)
         self.patch.start()
         self.client = TestClient(web.app)
+        self.clock_patch = patch.object(TradingScheduler, 'now', return_value=datetime.now().replace(hour=8, minute=0))
+        self.clock_patch.start()
 
     def tearDown(self):
+        self.clock_patch.stop()
         self.patch.stop()
         self.temporary.cleanup()
 
@@ -109,10 +112,11 @@ class MonitorTests(unittest.TestCase):
             entered.set()
             release.wait(3)
 
-        with patch.object(TradingTask, 'load_calendar_with_retry', return_value=True), \
-                patch('market_trading_bot.runner.run_pap', side_effect=trade):
+        with patch('market_trading_bot.runner.run_pap', side_effect=trade):
             with TestClient(web.app) as client:
                 scheduler = web.app.state.scheduler
+                scheduler.calendar_day = scheduler.now().date()
+                scheduler.is_trading_day = True
                 scheduler._start_task(path)
                 try:
                     self.assertTrue(entered.wait(2))
@@ -155,10 +159,11 @@ class MonitorTests(unittest.TestCase):
             else:
                 finished.set()
 
-        with patch.object(TradingTask, 'load_calendar_with_retry', return_value=True), \
-                patch('market_trading_bot.runner.run_pap', side_effect=trade):
+        with patch('market_trading_bot.runner.run_pap', side_effect=trade):
             with TestClient(web.app):
                 scheduler = web.app.state.scheduler
+                scheduler.calendar_day = scheduler.now().date()
+                scheduler.is_trading_day = True
                 scheduler._start_task(first)
                 try:
                     self.assertTrue(entered.wait(2))
