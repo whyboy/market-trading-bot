@@ -1,4 +1,4 @@
-"""15:05更新账户每日收盘资产及收益，不发送消息、不注册定时任务。"""
+"""更新账户每日资产及收益，不发送消息、不注册定时任务。"""
 import logging
 import threading
 from datetime import datetime, time
@@ -12,7 +12,7 @@ class DailyValuationTask:
     class Stopped(RuntimeError):
         pass
 
-    def __init__(self, root, settings, configs, context, stop_event, is_running, now):
+    def __init__(self, root, settings, configs, context, stop_event, is_trade_running, now):
         """创建估值线程；context 为当天日历，stop_event 与调度器共享。"""
         self.context = context
         self.thread = threading.Thread(target=self._run, name='daily-valuation-task', daemon=True)
@@ -21,7 +21,7 @@ class DailyValuationTask:
         self.settings = settings
         self.configs = configs
         self.stop_event = stop_event
-        self.is_running = is_running
+        self.is_trade_running = is_trade_running
         self.now = now
         self.logger = logging.getLogger(__name__)
 
@@ -91,7 +91,7 @@ class DailyValuationTask:
     def _value_account(self, market, results_service, strategy_id, instance_id):
         """计算当日收益；缺失上一交易日估值时按历史持仓补算。"""
         day = self.context['day']
-        if self.is_running(strategy_id, instance_id):
+        if self.is_trade_running(strategy_id, instance_id):
             raise RuntimeError('交易任务仍在运行')
         close_day = day if self.context['is_trading_day'] else self.context['previous_trading_day']
         account = AccountService.get_snapshot(self.directory, instance_id, close_day.isoformat())
@@ -100,7 +100,7 @@ class DailyValuationTask:
                 raise ValueError('休市日尚无可估值账户')
             return self._closing_assets(market, account, close_day)
         snapshot = self._closing_assets(market, account, day)
-        if self.is_running(strategy_id, instance_id):
+        if self.is_trade_running(strategy_id, instance_id):
             raise RuntimeError('交易任务仍在运行')
         previous_day = self.context['previous_trading_day']
         previous = DailyResultsService.get_valuation(self.directory, instance_id, previous_day.isoformat())
@@ -123,14 +123,15 @@ class DailyValuationTask:
 
     def _closing_assets(self, market, account, day):
         """按指定交易日收盘价计算资产及累计收益。"""
-        prices = market.closing_prices(account['positions'], day)
+        price_day = self.context.get('price_day', day) if day == self.context['day'] else day
+        prices = market.closing_prices(account['positions'], price_day)
         equity = Decimal(account['cash']) + sum((prices[symbol] * position['quantity']
                                                for symbol, position in account['positions'].items()), Decimal('0'))
         equity = equity.quantize(Decimal('.01'), rounding=ROUND_HALF_UP)
         initial_cash = Decimal(account['initial_cash'])
         if initial_cash <= 0:
             raise ValueError('实际开户资金必须大于零')
-        return {'date': day.isoformat(), 'as_of': datetime.combine(day, time(15), SHANGHAI).isoformat(),
+        return {'date': day.isoformat(), 'as_of': datetime.combine(price_day, time(15), SHANGHAI).isoformat(),
                 'equity': str(equity), 'cash': account['cash'], 'positions': account['positions'],
                 'cumulative_pnl': str(equity - initial_cash),
                 'cumulative_return_pct': str((equity / initial_cash - 1) * 100)}

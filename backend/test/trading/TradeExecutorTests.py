@@ -5,6 +5,15 @@ from TradeExecutorFixture import TradeExecutorFixture
 
 
 class TradeExecutorTests(TradeExecutorFixture, unittest.TestCase):
+    def test_t_plus_one_positions_remain_locked_on_non_trading_days(self):
+        account = {'date': '2026-11-20', 'cash': '1000',
+                   'positions': {'A': {'quantity': 900, 'sellable': 0}}}
+        holiday = self.executor.rebalance(self.signal(day=21, weight=0), account, is_trading_day=False)
+        self.assertEqual(holiday['positions']['A']['sellable'], 0)
+        self.assertEqual(holiday['fills'], [])
+        monday = self.executor.rebalance(self.signal(day=23, weight=0), holiday, is_trading_day=True)
+        self.assertEqual(monday['fills'][0]['quantity'], 900)
+
     def test_commission_lot_size_and_conservation(self):
         result = self.rebalance(self.signal(), self.executor, 10000)
         self.assertEqual(result['positions']['A'], {'quantity': 900, 'sellable': 0})

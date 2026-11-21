@@ -15,7 +15,7 @@ class TradingTask:
 
     def __init__(self, strategy, market, executor, account_store, *,
                  strategy_id, instance_id, initial_cash, scheduled_at, notifier, trade_timeout_seconds=300,
-                 log_context=None):
+                 log_context=None, is_trading_day=True):
         """创建交易线程；scheduled_at 决定记账日期，超时仅用于监控。"""
         self.strategy = strategy
         self.market = market
@@ -24,6 +24,7 @@ class TradingTask:
         self.strategy_id = strategy_id
         self.instance_id = instance_id
         self.initial_cash = initial_cash
+        self.is_trading_day = is_trading_day
         self.scheduled_at = scheduled_at
         self.logger = logging.getLogger(__name__)
         self.log_context = log_context if log_context is not None else nullcontext(self.logger)
@@ -106,7 +107,7 @@ class TradingTask:
             if transaction.completed is not None:
                 result = transaction.completed
             else:
-                result = self.executor.rebalance(signal, transaction.account)
+                result = self.executor.rebalance(signal, transaction.account, is_trading_day=self.is_trading_day)
                 result['signal'] = asdict(signal)
                 result = transaction.save_execution(result)
         return result

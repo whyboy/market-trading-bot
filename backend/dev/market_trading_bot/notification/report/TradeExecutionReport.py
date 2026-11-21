@@ -32,8 +32,11 @@ class TradeExecutionReport:
             lines.append('执行失败，请查看服务器策略日志；本报告不展示旧资产或收益。')
             return title, '\n'.join(lines)
         output = task.output
-        lines.extend([f"估值时间：{output['signal']['as_of']}",
-                      f"总资产：{Decimal(output['equity']):,.2f} 元",
+        lines.append(f"估值时间：{output['signal']['as_of']}")
+        ranking = output['signal'].get('ranking', [])
+        if ranking and ranking[0].get('quote_time'):
+            lines.append(f"行情时间：{ranking[0]['quote_time']}")
+        lines.extend([f"总资产：{Decimal(output['equity']):,.2f} 元",
                       f"可用现金：{Decimal(output['cash']):,.2f} 元"])
         account = task.account_store.get_latest_account(task.account_store.directory.parent, task.instance_id)
         initial_cash = Decimal(account['initial_cash'])

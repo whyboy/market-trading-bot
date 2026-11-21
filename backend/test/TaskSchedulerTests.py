@@ -33,7 +33,7 @@ class TaskSchedulerTests(unittest.TestCase):
                                     return_value=[date(2026, 11, 19), date(2026, 11, 20), date(2026, 11, 24)])
         self.calendar = self.calendar_patch.start()
         self.scheduler = TaskScheduler(self.root)
-        with patch.object(self.scheduler, 'prepare_calender_context'):
+        with patch.object(self.scheduler, 'prepare_calendar_context'):
             self.scheduler.start()
         self.scheduler.timer.pause()
 
@@ -45,7 +45,7 @@ class TaskSchedulerTests(unittest.TestCase):
 
     def prepare(self):
         self.current = DUE.replace(hour=9, minute=0)
-        self.scheduler.prepare_calender_context()
+        self.scheduler.prepare_calendar_context()
 
     def test_daily_calendar_trigger_is_nine_am(self):
         trigger = self.scheduler.timer.get_job('_calendar').trigger
@@ -64,22 +64,20 @@ class TaskSchedulerTests(unittest.TestCase):
         trigger = self.scheduler.timer.get_job('etf_rotation').trigger
         self.assertEqual(trigger.get_next_fire_time(None, self.current), DUE)
         self.assertEqual(trigger.get_next_fire_time(DUE, DUE + timedelta(seconds=1)), DUE + timedelta(days=1))
-        self.scheduler.prepare_calender_context()
+        self.scheduler.prepare_calendar_context()
         self.calendar.assert_called_once()
 
-    def test_holiday_creates_no_jobs_or_tasks(self):
+    def test_holiday_allows_scheduled_trade_with_prepared_calendar(self):
         self.current = DUE.replace(day=23, hour=9)
         with self.assertLogs('market_trading_bot.TaskScheduler', level='INFO') as logs:
-            self.scheduler.prepare_calender_context()
+            self.scheduler.prepare_calendar_context()
         self.assertIn('非交易日', logs.output[0])
         self.assertFalse(self.scheduler.calendar_context['is_trading_day'])
-        self.assertIsNotNone(self.scheduler.timer.get_job('_daily_valuation'))
-        self.assertIsNotNone(self.scheduler.timer.get_job('_daily_report'))
-        self.assertIsNotNone(self.scheduler.timer.get_job('etf_rotation'))
-        with patch('market_trading_bot.task.TradingTask.TradingTask.trade') as trade:
+        with patch.object(self.scheduler, '_build_trade_task') as build:
             self.scheduler._start_trades('etf_rotation', self.current.date())
-        trade.assert_not_called()
-        self.assertEqual(self.scheduler.tasks, {})
+            build.assert_called_once()
+            build.return_value.start.assert_called_once()
+        self.scheduler.tasks.clear()
 
     def test_calendar_failure_waits_five_seconds_then_registers_jobs(self):
         self.calendar.side_effect = [ValueError('网络失败'), [date(2026, 11, 19), date(2026, 11, 20), date(2026, 11, 24)]]
@@ -245,7 +243,7 @@ class TaskSchedulerTests(unittest.TestCase):
         scheduler.timer.pause()
         try:
             self.current = DUE.replace(hour=9)
-            scheduler.prepare_calender_context()
+            scheduler.prepare_calendar_context()
             self.calendar.assert_called_once()
             self.assertIsNotNone(scheduler.timer.get_job('etf_rotation'))
             self.assertIsNotNone(scheduler.timer.get_job('second'))
@@ -296,9 +294,27 @@ class TaskSchedulerTests(unittest.TestCase):
 
     def test_valuation_and_summary_have_daily_cron_triggers(self):
         valuation = self.scheduler.timer.get_job('_daily_valuation')
-        summary = self.scheduler.timer.get_job('_daily_report')
+        summary = self.scheduler.timer.get_job('_daily_report_15:15')
         self.assertEqual(valuation.trigger.get_next_fire_time(None, self.current), DUE.replace(hour=15, minute=5))
-        self.assertEqual(summary.trigger.get_next_fire_time(None, self.current), DUE.replace(hour=15, minute=10))
+        self.assertEqual(summary.trigger.get_next_fire_time(None, self.current), DUE.replace(hour=15, minute=15))
+
+    def test_report_times_register_separate_jobs_and_select_strategies(self):
+        self.scheduler.stop()
+        second = {**self.config, 'strategy': 'second', 'schedule': {'trade_time': '14:30', 'report_time': '19:30'}}
+        (self.root / 'market_trading_bot/config/second_strategy.json').write_text(json.dumps(second))
+        scheduler = TaskScheduler(self.root)
+        try:
+            scheduler.start()
+            scheduler.timer.pause()
+            self.assertIsNotNone(scheduler.timer.get_job('_daily_report_15:15'))
+            self.assertIsNotNone(scheduler.timer.get_job('_daily_report_19:30'))
+            self.current = DUE.replace(hour=19, minute=30)
+            with patch('market_trading_bot.TaskScheduler.DailySummaryTask') as task:
+                task.return_value.thread.is_alive.return_value = False
+                scheduler._start_summary(report_time='19:30')
+                self.assertEqual(list(task.call_args.args[2]), ['second'])
+        finally:
+            scheduler.stop()
 
     def test_late_start_schedules_recovery(self):
         self.scheduler.stop()
@@ -325,26 +341,29 @@ class TaskSchedulerTests(unittest.TestCase):
             self.calendar.assert_called_once()
             self.current += timedelta(days=1)
             self.scheduler._start_summary()
-            self.assertEqual(task_class.call_count, 1)
+            self.assertEqual(task_class.call_count, 2)
+            self.assertEqual(self.scheduler.calendar_context['day'], self.current.date())
 
-    def test_daily_jobs_do_not_start_on_holidays(self):
+    def test_daily_jobs_prepare_calendar_on_first_run(self):
         self.current = DUE.replace(day=23, hour=15, minute=10)
         with patch('market_trading_bot.TaskScheduler.DailyValuationTask') as valuation, \
              patch('market_trading_bot.TaskScheduler.DailySummaryTask') as summary:
             self.scheduler._start_valuation()
             self.scheduler._start_summary()
-        valuation.assert_not_called()
-        summary.assert_not_called()
+        valuation.assert_called_once()
+        summary.assert_called_once()
+        self.assertEqual(self.scheduler.calendar_context['day'], self.current.date())
+        self.calendar.assert_called_once()
 
     def test_all_jobs_skip_when_calendar_preparation_failed_or_stale(self):
         self.prepare()
         self.current = DUE.replace(day=23, hour=15, minute=10)
         self.calendar.side_effect = ValueError('网络失败')
-        with patch.object(self.scheduler.stop_event, 'wait', return_value=True):
-            self.scheduler.prepare_calender_context()
-        with patch.object(self.scheduler, '_build_trade_task') as trade, \
+        with patch.object(self.scheduler.stop_event, 'wait', return_value=True), \
+             patch.object(self.scheduler, '_build_trade_task') as trade, \
              patch('market_trading_bot.TaskScheduler.DailyValuationTask') as valuation, \
              patch('market_trading_bot.TaskScheduler.DailySummaryTask') as summary:
+            self.scheduler.prepare_calendar_context()
             self.scheduler._start_trades('etf_rotation')
             self.scheduler._start_valuation()
             self.scheduler._start_summary()
@@ -360,7 +379,7 @@ class TaskSchedulerTests(unittest.TestCase):
         task.thread.join.side_effect = lambda: events.append('valuation-finished')
         self.scheduler.valuation_task = task
         with patch.object(self.scheduler, '_start_valuation', side_effect=lambda: events.append('valuation-start')):
-            with patch.object(self.scheduler, '_start_summary', side_effect=lambda: events.append('summary-start')):
+            with patch.object(self.scheduler, '_start_summary', side_effect=lambda **kwargs: events.append('summary-start')):
                 self.scheduler._recover_daily_tasks()
         self.assertEqual(events, ['valuation-start', 'valuation-finished', 'summary-start'])
         self.scheduler.valuation_task = None
