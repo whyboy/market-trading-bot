@@ -12,7 +12,7 @@ class DailyClose:
 
 
 @dataclass(frozen=True)
-class MarketSnapshot:
+class MarketData:
     """单标的行情：未复权当前价、报价时间及按日期递增的历史收盘价。"""
 
     symbol: str

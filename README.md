@@ -25,20 +25,20 @@ market-trading-bot/
 │   │   └── market_trading_bot/
 │   │       ├── config/                    # 全局与策略配置
 │   │       ├── TaskScheduler.py           # 交易日判断与任务调度
-│   │       ├── data/                      # 共享数据结构，不依赖业务模块
-│   │       │   ├── MarketSnapshot.py        # MarketSnapshot、DailyClose
-│   │       │   └── StrategyResult.py        # StrategyResult、RankedETF
 │   │       ├── task/                      # 调度器管理的一次性任务
 │   │       │   ├── TradingTask.py          # 单次策略执行及状态更新
 │   │       │   ├── DailyValuationTask.py  # 15:05 更新收盘估值
 │   │       │   └── DailySummaryTask.py    # 15:10 汇总并发送日报
 │   │       ├── strategy/                  # 策略实现
-│   │       │   └── ETFRotationStrategyImpl.py
+│   │       │   ├── ETFRotationStrategyImpl.py
+│   │       │   └── StrategyData.py          # StrategyData、RankedETF
 │   │       ├── repository/                # 数据库访问
 │   │       │   ├── TaskStatusRepository.py
 │   │       │   └── PapAccountRepository.py
 │   │       ├── log/StrategyLogger.py      # 日志处理代码
-│   │       ├── market/AKShareMarket.py
+│   │       ├── market/                    # 行情适配及数据
+│   │       │   ├── AKShareMarket.py
+│   │       │   └── MarketData.py            # MarketData、DailyClose
 │   │       ├── trader/PapTrader.py
 │   │       └── app.py
 │   └── test/                              # 核心测试，不与源码包同名
@@ -147,7 +147,7 @@ backend/.venv/bin/python backend/main.py
 
 ```text
 TaskScheduler → TradingTask（绑定策略＋账户）
-                    ├── Market → Strategy → StrategyResult
+                    ├── Market → MarketData → Strategy → StrategyData
                     ├── PapTrader：纯内存模拟调仓
                     ├── PapAccountRepository：账户事务与CSV导出
                     └── TaskStatusRepository：该账户任务状态

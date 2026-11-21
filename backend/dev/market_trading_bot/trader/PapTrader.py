@@ -1,6 +1,6 @@
 """纯内存模拟调仓；账户持久化由 PapAccountRepository 负责。"""
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP
-from market_trading_bot.data.StrategyResult import StrategyResult
+from market_trading_bot.strategy.StrategyData import StrategyData
 
 
 class PapTrader:
@@ -18,7 +18,7 @@ class PapTrader:
                 raise ValueError('交易单位必须为正整数，t_plus_one必须为布尔值')
         self.instruments = instruments
 
-    def rebalance(self, signal: StrategyResult, account: dict) -> dict:
+    def rebalance(self, signal: StrategyData, account: dict) -> dict:
         """使用策略生成的目标权重，按调仓前净资产计算份额；先卖后买，返回成交及新账户。"""
         day = signal.as_of.date().isoformat()
         if account['date'] and day <= account['date']:

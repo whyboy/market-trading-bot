@@ -2,8 +2,8 @@
 import math
 import numpy as np
 from datetime import datetime
-from market_trading_bot.data.MarketSnapshot import MarketSnapshot
-from market_trading_bot.data.StrategyResult import RankedETF, StrategyResult
+from market_trading_bot.market.MarketData import MarketData
+from market_trading_bot.strategy.StrategyData import RankedETF, StrategyData
 
 
 class ETFRotationStrategyImpl:
@@ -32,7 +32,7 @@ class ETFRotationStrategyImpl:
         """所需历史收盘价数量；两个计算窗口均另含一笔当日价格。"""
         return max(self.momentum_points, self.volatility_points) - 1
 
-    def calculate(self, snapshots: dict[str, MarketSnapshot], as_of: datetime) -> StrategyResult:
+    def calculate(self, snapshots: dict[str, MarketData], as_of: datetime) -> StrategyData:
         """计算动量排名，将最高分标的按目标波动率分配仓位。
 
         得分为年化回归收益乘 R²；全部为负仍选最高分，同分按 ETF 池顺序。
@@ -65,4 +65,4 @@ class ETFRotationStrategyImpl:
         winner = ranking[0]
         weight = 1.0 if winner.annual_volatility < 1e-6 else min(1.0, self.target_volatility / winner.annual_volatility)
         targets = {symbol: weight if symbol == winner.symbol else 0.0 for symbol in self.symbols}
-        return StrategyResult(as_of, tuple(ranking), targets)
+        return StrategyData(as_of, tuple(ranking), targets)

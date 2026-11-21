@@ -9,7 +9,7 @@ import time as clock
 from akshare.utils.context import config as ak_config
 from datetime import datetime, time, timedelta
 from decimal import Decimal
-from market_trading_bot.data.MarketSnapshot import DailyClose, MarketSnapshot
+from market_trading_bot.market.MarketData import DailyClose, MarketData
 from zoneinfo import ZoneInfo
 
 SHANGHAI = ZoneInfo('Asia/Shanghai')
@@ -38,7 +38,7 @@ class AKShareMarket:
             raise ValueError('行情超时、时效和回溯天数必须为正数')
         ak_config.timeout = self.timeout
 
-    def load(self, symbols: tuple[str, ...], history_points: int) -> tuple[datetime, dict[str, MarketSnapshot]]:
+    def load(self, symbols: tuple[str, ...], history_points: int) -> tuple[datetime, dict[str, MarketData]]:
         """加载连续历史收盘价及当日报价，校验交易时段、日期和价格。"""
         started_at = datetime.now(SHANGHAI)
         self.logger.info('行情获取开始 provider=akshare_eastmoney symbols=%s', ','.join(symbols))
@@ -96,7 +96,7 @@ class AKShareMarket:
                 history = histories[symbol]
                 if any(not math.isfinite(value) or value <= 0 for value in [price, *(bar.close for bar in history)]):
                     raise MarketDataError(f'{symbol}: 价格无效')
-                snapshots[symbol] = MarketSnapshot(symbol, quoted_at, price, history)
+                snapshots[symbol] = MarketData(symbol, quoted_at, price, history)
             self.logger.info('行情获取成功 count=%d as_of=%s', len(snapshots), as_of.isoformat())
             return as_of, snapshots
         except MarketDataError as exc:

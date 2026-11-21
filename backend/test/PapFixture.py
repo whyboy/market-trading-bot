@@ -1,7 +1,7 @@
 """模拟账户核心测试使用的共同数据。"""
 from datetime import datetime, timedelta
-from market_trading_bot.data.StrategyResult import RankedETF, StrategyResult
 from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
+from market_trading_bot.strategy.StrategyData import RankedETF, StrategyData
 from market_trading_bot.task.TradingTask import TradingTask
 from market_trading_bot.trader.PapTrader import PapTrader
 from pathlib import Path
@@ -25,7 +25,7 @@ class PapFixture:
         now = datetime(2026, 11, day, 14, 30, tzinfo=ZoneInfo('Asia/Shanghai'))
         ranking = tuple(RankedETF(symbol, 1, .2, price, now, now.date() - timedelta(days=30),
                                   now.date() - timedelta(days=1)) for symbol, price in zip(self.rules, prices))
-        return StrategyResult(now, ranking, {symbol: weight if symbol == winner else 0 for symbol in self.rules})
+        return StrategyData(now, ranking, {symbol: weight if symbol == winner else 0 for symbol in self.rules})
 
     def make_task(self, signal, executor=None, initial_cash=10000, repository=None):
         strategy = Mock()
