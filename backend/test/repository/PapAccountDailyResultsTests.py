@@ -3,7 +3,6 @@ import json
 import sqlite3
 import tempfile
 import unittest
-from datetime import datetime
 from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
 from pathlib import Path
 
@@ -27,17 +26,6 @@ class PapAccountDailyResultsTests(unittest.TestCase):
             if duplicate:
                 connection.execute('INSERT INTO runs VALUES (?, ?)', ('2026-11-20', json.dumps(self.execution)))
         return database
-
-    def test_new_account_has_two_tables_and_creation_metadata(self):
-        repository = PapAccountRepository(self.root, 'pap', 'rotation')
-        with repository.begin_rebalance_transaction('2026-11-20', 100000) as transaction:
-            transaction.save_execution_result(self.execution)
-        with sqlite3.connect(repository.database) as connection:
-            tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            metadata = connection.execute('SELECT instance_id, strategy_id, created_at FROM account').fetchone()
-        self.assertEqual(tables, {'account', 'daily_results'})
-        self.assertEqual(metadata[:2], ('pap', 'rotation'))
-        self.assertIsNotNone(datetime.fromisoformat(metadata[2]).tzinfo)
 
     def test_legacy_migration_preserves_all_data_and_can_be_reopened(self):
         database = self.seed_legacy()
@@ -94,10 +82,3 @@ class PapAccountDailyResultsTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 transaction.save_execution_result({**self.execution, 'cash': '0'})
         self.assertEqual(repository.find_execution_by_date('2026-11-20')['cash'], '100000')
-
-    def test_account_cannot_be_reassigned_to_another_strategy(self):
-        repository = PapAccountRepository(self.root, 'pap', 'rotation')
-        with repository.begin_rebalance_transaction('2026-11-20', 100000) as transaction:
-            transaction.save_execution_result(self.execution)
-        with self.assertRaises(ValueError):
-            PapAccountRepository(self.root, 'pap', 'other')

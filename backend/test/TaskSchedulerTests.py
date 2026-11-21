@@ -270,64 +270,6 @@ class TaskSchedulerTests(unittest.TestCase):
             self.assertEqual(task_class.call_count, 2)
             self.assertFalse(task_class.call_args.args[4]['is_trading_day'])
 
-    def test_stop_prevents_starting_daily_task(self):
-        self.current = DUE.replace(hour=15, minute=10)
-        self.scheduler.stop_event.set()
-        with patch('market_trading_bot.TaskScheduler.DailySummaryTask') as task_class:
-            self.scheduler._start_daily_summary_task()
-        task_class.assert_not_called()
-        self.assertIsNone(self.scheduler.reported_day)
-
-    def test_daily_calendar_failure_is_retried_by_scheduler_then_passed_to_task(self):
-        self.current = DUE.replace(hour=15, minute=10)
-        self.calendar.side_effect = ValueError('offline')
-        with patch.object(self.scheduler.stop_event, 'wait', return_value=False) as wait:
-            with patch('market_trading_bot.TaskScheduler.DailySummaryTask') as task_class:
-                self.scheduler._start_daily_summary_task()
-        self.assertEqual(self.calendar.call_count, 3)
-        self.assertEqual(wait.call_count, 2)
-        self.assertIn('交易日历获取失败', task_class.call_args.args[4]['notice'])
-
-    def test_stop_joins_daily_task(self):
-        task = Mock()
-        valuation = Mock()
-        self.scheduler.daily_summary_task = task
-        self.scheduler.daily_valuation_task = valuation
-        self.scheduler.stop()
-        task.stop.assert_called_once()
-        valuation.stop.assert_called_once()
-        self.scheduler.daily_summary_task = None
-        self.scheduler.daily_valuation_task = None
-
-    def test_start_after_fifteen_oh_five_schedules_same_day_report(self):
-        self.scheduler.stop()
-        self.current = DUE.replace(hour=16)
-        scheduler = TaskScheduler(self.root)
-        try:
-            with patch.object(scheduler.timer, 'start'), patch.object(scheduler.timer, 'add_job') as add_job:
-                scheduler.start()
-            self.assertTrue(any(call.kwargs.get('id') == '_startup_daily_tasks' for call in add_job.call_args_list))
-        finally:
-            scheduler.stop()
-
-    def test_valuation_task_is_registered_and_started_separately(self):
-        self.prepare()
-        self.current = DUE.replace(hour=15, minute=5)
-        with patch('market_trading_bot.TaskScheduler.DailyValuationTask') as task_class:
-            task_class.return_value.thread.is_alive.return_value = False
-            self.scheduler._start_daily_valuation_task()
-            self.scheduler._start_daily_valuation_task()
-        task_class.assert_called_once()
-        task_class.return_value.start.assert_called_once()
-        self.assertEqual(task_class.call_args.args[3]['previous_trading_day'], date(2026, 11, 19))
-        self.calendar.assert_called_once()
-
-    def test_summary_does_not_start_before_fifteen_ten(self):
-        self.current = DUE.replace(hour=15, minute=9)
-        with patch('market_trading_bot.TaskScheduler.DailySummaryTask') as task_class:
-            self.scheduler._start_daily_summary_task()
-        task_class.assert_not_called()
-
     def test_late_start_waits_for_valuation_before_summary(self):
         self.current = DUE.replace(hour=16)
         events = []

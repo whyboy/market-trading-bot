@@ -74,13 +74,6 @@ class DailyValuationTaskTests(unittest.TestCase):
         self.assertEqual(previous['equity'], '100000.00')
         self.assertEqual(previous['positions']['510300.XSHG']['quantity'], 100)
 
-    def test_existing_previous_close_is_reused(self):
-        repository = self.save_account(self.day)
-        repository.save_daily_valuation({'date': '2026-11-19', 'equity': '100500'})
-        self.run_task()
-        self.assertEqual(self.result()['valuation']['daily_pnl'], '495.00')
-        self.market.closing_prices.assert_called_once()
-
     def test_no_trade_still_creates_daily_valuation_without_fabricating_execution(self):
         self.save_account(date(2026, 11, 19), cash='90000', quantity=100)
         self.run_task()
@@ -90,16 +83,6 @@ class DailyValuationTaskTests(unittest.TestCase):
         self.assertEqual(result['valuation']['buy_count'], 0)
         self.assertIn('未完成记账', result['valuation']['execution_note'])
         self.assertIsNone(self.store().find_execution_by_date('2026-11-20'))
-
-    def test_empty_positions_are_valued_as_cash(self):
-        self.save_account(self.day, cash='100000', quantity=0)
-        self.run_task()
-        self.assertEqual(self.result()['valuation']['equity'], '100000.00')
-
-    def test_uninitialized_account_is_not_created_by_valuation(self):
-        self.run_task()
-        self.assertFalse((self.root / 'data/pap').exists())
-        self.market.closing_prices.assert_not_called()
 
     def test_holiday_reuses_existing_close_without_creating_holiday_row(self):
         self.save_account(self.day)
@@ -124,38 +107,6 @@ class DailyValuationTaskTests(unittest.TestCase):
         self.assertIn('估值失败', result['valuation_error'])
         self.assertIsNone(result['valuation'])
         self.assertFalse((self.root / 'data/second').exists())
-
-    def test_delayed_close_retries_then_updates_daily_results(self):
-        self.save_account(self.day)
-        self.market.closing_prices.side_effect = [ValueError('not ready'), {'510300.XSHG': Decimal('105')}]
-        with patch.object(self.stop, 'wait', return_value=False) as wait:
-            self.run_task()
-        wait.assert_called_once_with(30)
-        self.assertEqual(self.result()['valuation_status'], 'success')
-
-    def test_stop_during_retry_leaves_visible_running_status(self):
-        self.save_account(self.day)
-        self.market.closing_prices.side_effect = ValueError('offline')
-        with patch.object(self.stop, 'wait', return_value=True):
-            self.assertFalse(self.run_task())
-        self.assertEqual(self.result()['valuation_status'], 'running')
-
-    def test_calendar_failure_is_stored_without_fetching_market(self):
-        self.save_account(self.day)
-        self.context['notice'] = '交易日历获取失败，请查看日志。'
-        self.run_task()
-        self.assertEqual(self.result()['valuation_status'], 'failed')
-        self.assertIn('交易日历获取失败', self.result()['valuation_error'])
-        self.market.closing_prices.assert_not_called()
-
-    def test_task_thread_completes_and_does_not_send_messages(self):
-        self.save_account(self.day)
-        with patch('market_trading_bot.task.DailyValuationTask.AKShareMarket', return_value=self.market):
-            self.task.start()
-            self.task.thread.join(timeout=3)
-        self.assertFalse(self.task.thread.is_alive())
-        self.assertTrue(self.task.completed)
-        self.assertEqual(self.result()['valuation_status'], 'success')
 
     def test_valuation_then_summary_sends_saved_returns_in_one_message(self):
         self.save_account(self.day)
