@@ -30,7 +30,7 @@ class AppTests(unittest.TestCase):
         self.clock_patch.start()
         def build(scheduler, strategy_id, instance, scheduled_at):
             return TradingTask(Mock(), Mock(), Mock(), Mock(), Mock(), strategy_id=strategy_id,
-                               instance_id=instance['id'], initial_cash=100000, scheduled_at=scheduled_at)
+                               instance_id=instance['id'], initial_cash=100000, scheduled_at=scheduled_at, notifier=Mock())
         self.build_patch = patch.object(TradingScheduler, '_build_task', build)
         self.build_patch.start()
 

@@ -14,8 +14,8 @@ class TradingTask:
     """协调已注入的依赖，不读取配置或构建策略、行情、执行器及Repository。"""
 
     def __init__(self, strategy, market, executor, account_repository, status_repository, *,
-                 strategy_id, instance_id, initial_cash, scheduled_at, trade_timeout_seconds=300,
-                 log_context=None, notifier=None):
+                 strategy_id, instance_id, initial_cash, scheduled_at, notifier, trade_timeout_seconds=300,
+                 log_context=None):
         self.strategy = strategy
         self.market = market
         self.executor = executor
@@ -72,11 +72,7 @@ class TradingTask:
             try:
                 self._heartbeat()
             finally:
-                if self.notifier is not None:
-                    try:
-                        self.notifier.report(self)
-                    except Exception:
-                        self.logger.error('执行报告保存失败；交易结果不受影响')
+                self.notifier.report(self)
 
     def run_pap(self) -> dict:
         """已有当日账本则直接返回，否则获取行情、计算信号并原子调仓。"""

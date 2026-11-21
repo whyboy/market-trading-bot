@@ -28,8 +28,9 @@ class PushPlusTests(unittest.TestCase):
             strategy_id='etf_rotation', instance_id='pap',
             scheduled_at=datetime(2026, 11, 20, 14, 30, tzinfo=SHANGHAI),
             result={'success': True, 'finished_at': '2026-11-20T14:31:00+08:00'},
-            output={'date': '2026-11-20', 'equity': '102350', 'cash': '12350',
-                    'positions': {}, 'fills': []},
+            output={'date': '2026-11-20', 'signal': {'as_of': '2026-11-20T14:30:00+08:00'},
+                    'equity': '102350', 'cash': '12350',
+                    'positions': {}, 'fills': [], 'csv_exported': True},
             account_repository=SimpleNamespace(directory=self.root / 'data/pap',
                                                latest=lambda *args: {'initial_cash': '100000'}))
 
@@ -110,18 +111,19 @@ class PushPlusTests(unittest.TestCase):
         self.assertEqual(post.call_args.kwargs['timeout'], (3, 10))
 
     def test_notification_failure_does_not_change_successful_trade(self):
-        notifier = Mock()
-        notifier.report.side_effect = RuntimeError('disk full')
+        notifier = PushPlusNotifier(self.root, self.settings)
         task = TradingTask(Mock(), Mock(), Mock(), Mock(), Mock(), strategy_id='example',
                            instance_id='pap', initial_cash=100000,
                            scheduled_at=datetime(2026, 11, 20, 14, 30, tzinfo=SHANGHAI), notifier=notifier)
         with patch.object(task, 'run_pap', return_value={'fills': []}) as trade:
-            task.start()
-            task.thread.join(timeout=3)
+            with patch.object(TradingReport, 'build', return_value=('title', 'content')):
+                with patch.object(notifier.repository, 'enqueue', side_effect=OSError('disk full')) as enqueue:
+                    task.start()
+                    task.thread.join(timeout=3)
         self.assertFalse(task.thread.is_alive())
         self.assertTrue(task.result['success'])
         trade.assert_called_once()
-        notifier.report.assert_called_once_with(task)
+        enqueue.assert_called_once()
 
     def test_database_failure_does_not_prevent_service_setup(self):
         with patch('market_trading_bot.PushPlusNotifier.NotificationRepository', side_effect=OSError('disk full')):

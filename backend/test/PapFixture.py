@@ -34,7 +34,7 @@ class PapFixture:
         market.load.return_value = (signal.as_of, {})
         return TradingTask(strategy, market, executor or self.executor, repository or self.account_store, Mock(),
                            strategy_id='etf_rotation', instance_id='pap', initial_cash=initial_cash,
-                           scheduled_at=signal.as_of)
+                           scheduled_at=signal.as_of, notifier=Mock())
 
     def rebalance(self, signal, executor, initial_cash, repository=None):
         return self.make_task(signal, executor, initial_cash, repository)._rebalance(signal)

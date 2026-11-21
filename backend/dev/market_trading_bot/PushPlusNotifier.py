@@ -34,8 +34,6 @@ class PushPlusNotifier:
                               task.strategy_id, task.instance_id)
 
     def dispatch(self):
-        if self.repository is None:
-            return
         try:
             message = self.repository.due()
             if message is None:
