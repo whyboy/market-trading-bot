@@ -157,7 +157,6 @@ npm run dev --prefix frontend -- --port 8000 --strictPort
 
 部署时执行 `npm run build --prefix frontend`，只需启动一个后端服务，
 通过 `http://127.0.0.1:8001` 同时访问页面与 API，无需启动前端开发服务。
-当前无登录功能，公网访问需配置认证。
 
 ### API
 
