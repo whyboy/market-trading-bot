@@ -9,7 +9,7 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from market_trading_bot.runtime.RuntimeStore import RuntimeStore
-from market_trading_bot.runtime.TradingWorker import TradingWorker
+from market_trading_bot.runtime.TradingTask import TradingTask
 from market_trading_bot.web import app as web
 from pathlib import Path
 from unittest.mock import patch
@@ -84,11 +84,11 @@ class MonitorTests(unittest.TestCase):
 
     def test_web_manages_worker_lifecycle(self):
         with TestClient(web.app) as client:
-            worker = web.app.state.workers['example']
+            worker = web.app.state.scheduler.tasks['example']
             self.assertTrue(worker.thread.is_alive())
             self.assertTrue(client.get('/api/runtime').json()['online'])
             self.assertFalse((self.root / 'data/example_pap').exists())
-            duplicate = TradingWorker(self.root, self.root / 'config/example_strategy.json')
+            duplicate = TradingTask(self.root, self.root / 'config/example_strategy.json')
             with self.assertRaisesRegex(RuntimeError, '只启动一个后端实例'):
                 duplicate.start()
         self.assertFalse(worker.thread.is_alive())
@@ -99,7 +99,7 @@ class MonitorTests(unittest.TestCase):
 
     def test_dead_worker_is_offline_even_with_fresh_heartbeat(self):
         with TestClient(web.app) as client:
-            worker = web.app.state.workers['example']
+            worker = web.app.state.scheduler.tasks['example']
             worker.stop()
             now = datetime.now(timezone.utc).isoformat()
             worker.store.write({**worker.status, 'state': 'idle', 'heartbeat_at': now})
@@ -119,7 +119,7 @@ class MonitorTests(unittest.TestCase):
 
         with patch('market_trading_bot.runner.run_pap', side_effect=trade):
             with TestClient(web.app) as client:
-                worker = web.app.state.workers['example']
+                worker = web.app.state.scheduler.tasks['example']
                 worker.submit_trade(self.root / 'config/example_strategy.json', 'example_pap')
                 try:
                     self.assertTrue(entered.wait(2))
@@ -152,7 +152,7 @@ class MonitorTests(unittest.TestCase):
     def test_failed_trade_records_error_and_worker_remains_available(self):
         with patch('market_trading_bot.runner.run_pap', side_effect=ValueError('行情无效')):
             with TestClient(web.app) as client:
-                worker = web.app.state.workers['example']
+                worker = web.app.state.scheduler.tasks['example']
                 worker.submit_trade(self.root / 'config/example_strategy.json', 'example_pap')
                 deadline = time.monotonic() + 2
                 while time.monotonic() < deadline and not worker.store.read()['last_execution']:
@@ -170,7 +170,7 @@ class MonitorTests(unittest.TestCase):
         configuration['enable'] = False
         path.write_text(json.dumps(configuration))
         with TestClient(web.app) as client:
-            self.assertEqual(web.app.state.workers, {})
+            self.assertEqual(web.app.state.scheduler.tasks, {})
             self.assertEqual(client.get('/api/runtime?strategy_id=example').json()['state'], 'disabled')
             self.assertFalse(client.get('/api/strategies').json()[0]['enable'])
         self.assertFalse((self.root / 'data').exists())
@@ -179,7 +179,7 @@ class MonitorTests(unittest.TestCase):
         (self.root / 'config/second_strategy.json').write_text(json.dumps({
             'strategy': 'second', 'instances': [{'id': 'second_pap', 'mode': 'pap', 'enabled': False}]}))
         with TestClient(web.app) as client:
-            workers = dict(web.app.state.workers)
+            workers = dict(web.app.state.scheduler.tasks)
             self.assertEqual(set(workers), {'example', 'second'})
             self.assertNotEqual(workers['example'].thread.ident, workers['second'].thread.ident)
             self.assertNotEqual(workers['example'].store.database, workers['second'].store.database)
@@ -212,7 +212,7 @@ class MonitorTests(unittest.TestCase):
 
         with patch('market_trading_bot.runner.run_pap', side_effect=trade):
             with TestClient(web.app) as client:
-                workers = web.app.state.workers
+                workers = web.app.state.scheduler.tasks
                 workers['example'].submit_trade(self.root / 'config/example_strategy.json', 'example_pap')
                 try:
                     self.assertTrue(entered.wait(2))
@@ -226,7 +226,7 @@ class MonitorTests(unittest.TestCase):
     def test_startup_failure_stops_already_started_workers(self):
         (self.root / 'config/second_strategy.json').write_text(json.dumps({
             'strategy': 'second', 'instances': []}))
-        start = TradingWorker.start
+        start = TradingTask.start
         started = []
 
         def start_worker(worker):
@@ -235,7 +235,7 @@ class MonitorTests(unittest.TestCase):
             start(worker)
             started.append(worker)
 
-        with patch.object(TradingWorker, 'start', start_worker):
+        with patch.object(TradingTask, 'start', start_worker):
             with self.assertRaisesRegex(RuntimeError, '测试启动失败'):
                 with TestClient(web.app):
                     pass
