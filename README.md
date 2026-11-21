@@ -2,7 +2,7 @@
 
 ETF 动量轮动程序，启动后按配置的时间定时模拟调仓，并提供网页运行监控。模拟账户使用 SQLite 原子记账，可恢复、可防止同日重复成交，并导出账户交易汇总 CSV。
 
-新增的独立行情源支持 BaoStock 日线、腾讯日线以及新浪和腾讯报价，并提供故障切换；当前交易流程仍使用原有行情实现，尚未接入这些新类。
+交易流程使用 MarketProvider 获取行情：日线优先 BaoStock，失败时使用腾讯；盘中报价优先腾讯，失败时使用新浪。收盘估值使用不复权价格。
 
 当前实现 `etf_rotation` 策略和 `pap` 模拟模式，支持定时调仓、估值和推送。
 
@@ -53,7 +53,7 @@ market-trading-bot/
 │   └── test/                              # 核心测试，不与源码包同名
 │       ├── TaskSchedulerTests.py
 │       ├── strategy/ETFRotationStrategyImplTests.py
-│       ├── market/AKShareMarketTests.py
+│       ├── market/MarketSnapshotTests.py
 │       ├── repository/AccountRepositoryTests.py
 │       ├── trading/TradeExecutorTests.py
 │       └── AppTests.py

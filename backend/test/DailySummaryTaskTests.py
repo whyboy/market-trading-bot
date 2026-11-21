@@ -3,7 +3,7 @@ import tempfile
 import threading
 import unittest
 from datetime import date, datetime
-from market_trading_bot.market.source.AKShareMarket import SHANGHAI
+from market_trading_bot.market.MarketProvider import SHANGHAI
 from market_trading_bot.service.AccountService import AccountService
 from market_trading_bot.service.DailyResultsService import DailyResultsService
 from market_trading_bot.task.DailySummaryTask import DailySummaryTask

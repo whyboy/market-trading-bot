@@ -3,7 +3,7 @@ import logging
 import threading
 from datetime import datetime, time
 from decimal import Decimal, ROUND_HALF_UP
-from market_trading_bot.market.source.AKShareMarket import AKShareMarket, SHANGHAI
+from market_trading_bot.market.MarketProvider import MarketProvider, SHANGHAI
 from market_trading_bot.service.AccountService import AccountService
 from market_trading_bot.service.DailyResultsService import DailyResultsService
 
@@ -78,7 +78,7 @@ class DailyValuationTask:
             return
         results_service.set_valuation_status(close_day.isoformat(), 'running')
         try:
-            market = AKShareMarket(self.settings['market'])
+            market = MarketProvider(self.settings['market'])
             summary = self._retry(lambda: self._value_account(market, results_service, strategy_id, instance['id']), day)
             results_service.save_valuation(summary)
         except self.Stopped:

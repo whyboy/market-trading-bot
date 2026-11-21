@@ -3,7 +3,7 @@ import requests
 import tempfile
 import unittest
 from datetime import datetime
-from market_trading_bot.market.source.AKShareMarket import SHANGHAI
+from market_trading_bot.market.MarketProvider import SHANGHAI
 from market_trading_bot.notification.PushPlusClient import PushPlusClient
 from market_trading_bot.notification.PushPlusNotifier import PushPlusNotifier
 from market_trading_bot.notification.report.TradeExecutionReport import TradeExecutionReport

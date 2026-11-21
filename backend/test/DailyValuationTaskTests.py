@@ -4,7 +4,7 @@ import threading
 import unittest
 from datetime import date, datetime
 from decimal import Decimal
-from market_trading_bot.market.source.AKShareMarket import SHANGHAI
+from market_trading_bot.market.MarketProvider import SHANGHAI
 from market_trading_bot.notification.PushPlusNotifier import PushPlusNotifier
 from market_trading_bot.service.AccountService import AccountService
 from market_trading_bot.service.DailyResultsService import DailyResultsService
@@ -45,7 +45,7 @@ class DailyValuationTaskTests(unittest.TestCase):
         return repository
 
     def run_task(self):
-        with patch('market_trading_bot.task.DailyValuationTask.AKShareMarket', return_value=self.market):
+        with patch('market_trading_bot.task.DailyValuationTask.MarketProvider', return_value=self.market):
             return self.task.run()
 
     def result(self, day='2026-11-20'):
@@ -157,7 +157,7 @@ class DailyValuationTaskTests(unittest.TestCase):
 
         self.market.closing_prices.side_effect = close
         notifier = Mock()
-        with patch('market_trading_bot.task.DailyValuationTask.AKShareMarket', return_value=self.market):
+        with patch('market_trading_bot.task.DailyValuationTask.MarketProvider', return_value=self.market):
             self.task.start()
             try:
                 self.assertTrue(entered.wait(2))
