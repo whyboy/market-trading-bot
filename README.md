@@ -128,48 +128,50 @@ python -m venv .venv
 
 ## 网页运行监控（第一版）
 
-使用 Vue 3 + TypeScript + Vite 构建页面，FastAPI 提供只读接口与静态文件。
-需要 Node.js 20.19+ 或 22.12+，以及 Python 3.12+。
+Vue 3 前端 + FastAPI 后端，支持运行状态、策略与账户概览、按日期查看和刷新日志。
+账户展示最近调仓估值，非实时估值；暂不支持定时调度和日报。
+
+### 端口与启动
+
+以下命令从项目根目录执行，需要 Python 3.12+、Node.js 20.19+ 或 22.12+。
+
+首次安装：
 
 ```bash
 .venv/bin/python -m pip install -r requirements.txt
-cd frontend
-npm ci
-npm run build
-cd ..
-.venv/bin/python -m uvicorn market_trading_bot.web.app:app --app-dir src --host 127.0.0.1 --port 8000
+npm ci --prefix frontend
 ```
 
-打开 `http://127.0.0.1:8000`。另一个终端启动交易常驻进程：
+分别在三个终端启动：
 
 ```bash
+# 后端：8000
+.venv/bin/python -m uvicorn market_trading_bot.web.app:app --app-dir src --host 127.0.0.1 --port 8000
+
+# 前端：5173，浏览器打开 http://127.0.0.1:5173
+npm run dev --prefix frontend -- --port 5173 --strictPort
+
+# 交易进程：无 HTTP 端口，每 5 秒上报心跳
 .venv/bin/python worker.py
 ```
 
-worker 使用 Linux 文件锁防止同一数据目录重复启动。每个部署只启动一个 worker。它每 5 秒记录一次心跳，超过 20 秒未更新时页面显示心跳中断。
-页面展示交易进程本次启动时间、运行时长与最近心跳，可选择策略和账户查看最近调仓估值，
-并按日期点击、刷新及分段加载策略日志。没有账本时显示暂无账户记录，不会自动开户。
-同一策略多个账户的日志保存在同一日期文件中。
+前端将 `/api` 请求代理到后端 `8000`。worker 默认待命；如需启动时执行一次模拟调仓，
+改用 `.venv/bin/python worker.py --pap etf_rotation_pap`。
 
-当前 worker 默认待命，尚不包含定时调度；待命不代表已经执行过交易。
-若需启动时执行一次模拟调仓，再进入待命：
+部署时执行 `npm run build --prefix frontend`，只需启动后端和 worker，
+通过 `http://127.0.0.1:8000` 同时访问页面与 API，无需启动前端开发服务。
+当前无登录功能，公网访问需配置认证。
 
-```bash
-.venv/bin/python worker.py --pap etf_rotation_pap
-```
+### API
 
-该次执行的成功或失败会显示在监控页；原有 `main.py` 手动执行结果继续通过账本和日志查看，
-不会更新 worker 的最近任务状态。心跳数据库位于配置的数据目录下，账户和日志沿用原有配置。
-Web 和 worker 应由部署环境分别管理和重启；worker 停止后 Web 仍能显示其停止或失联状态。
-第一版无登录功能，默认仅监听本机；公网访问应通过有认证的反向代理提供。
+以下均为只读 `GET` 接口：
 
-前端开发时运行 `cd frontend && npm run dev`，Vite 将 `/api` 代理到本机 8000 端口。
-新增策略配置沿用 `config/*_strategy.json` 命名。
+| 路径 | 功能 |
+|---|---|
+| `/api/runtime` | 交易进程启动时间、运行时长、心跳和最近任务结果 |
+| `/api/strategies` | 策略与账户实例列表 |
+| `/api/accounts/{instance_id}` | 最近账户资产与持仓 |
+| `/api/strategies/{strategy_id}/logs` | 日志日期列表，按日期倒序 |
+| `/api/strategies/{strategy_id}/logs/{date}?offset=0` | 指定日期日志，返回内容及下一页偏移量 |
 
-验证：
-
-```bash
-.venv/bin/python -m pip install -r requirements-dev.txt
-PYTHONPATH=src .venv/bin/python -m unittest discover -s tests
-cd frontend && npm run build
-```
+日志日期格式为 `YYYY-MM-DD`；日志按策略归档。最近任务结果仅记录通过 worker 执行的任务。
