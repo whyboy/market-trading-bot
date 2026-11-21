@@ -17,7 +17,7 @@ class PushPlusTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        self.settings = {'storage': {'data_dir': 'data'}, 'pushplus': {'enabled': True, 'token': 'test-secret'}}
+        self.settings = {'storage': {'data_dir': 'data'}, 'pushplus': {'token': 'test-secret'}}
 
     def task(self):
         return SimpleNamespace(
@@ -40,14 +40,6 @@ class PushPlusTests(unittest.TestCase):
             notifier.report(self.task())
         send.assert_called_once_with(title, content)
         self.assertFalse((self.root / 'data').exists())
-
-    def test_disabled_or_missing_token_skips_report(self):
-        with patch('market_trading_bot.notification.PushPlusNotifier.PushPlusClient') as client:
-            self.settings['pushplus']['enabled'] = False
-            PushPlusNotifier(self.settings).report(self.task())
-            self.settings['pushplus'].update(enabled=True, token='')
-            PushPlusNotifier(self.settings).report(self.task())
-        client.assert_not_called()
 
     def test_failed_report_does_not_expose_exception(self):
         task = self.task()

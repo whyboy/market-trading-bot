@@ -8,18 +8,10 @@ from market_trading_bot.notification.report.TradeExecutionReport import TradeExe
 class PushPlusNotifier:
     def __init__(self, settings):
         self.logger = logging.getLogger(__name__)
-        self.client = None
-        if not settings.get('pushplus', {}).get('enabled', False):
-            return
         token = settings['pushplus']['token'].strip()
-        if not token:
-            self.logger.error('PushPlus 已启用但未设置 pushplus.token，通知已停用；交易继续运行')
-            return
         self.client = PushPlusClient(token)
 
     def report(self, task):
-        if self.client is None:
-            return
         try:
             title, content = TradeExecutionReport.build(task)
             self.client.send(title, content)
@@ -31,8 +23,6 @@ class PushPlusNotifier:
 
     def daily_report(self, strategy_id, instance_id, summary):
         """接收已计算的每日估值，生成并发送总结。"""
-        if self.client is None:
-            return
         try:
             title, content = DailyAccountReport.build(strategy_id, instance_id, summary)
             self.client.send(title, content)

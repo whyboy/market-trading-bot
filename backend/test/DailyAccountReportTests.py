@@ -42,7 +42,7 @@ class DailyAccountReportTests(unittest.TestCase):
         self.assertIn('持仓：空仓', content)
 
     def test_daily_report_is_sent_directly(self):
-        notifier = PushPlusNotifier({'pushplus': {'enabled': True, 'token': 'test-token'}})
+        notifier = PushPlusNotifier({'pushplus': {'token': 'test-token'}})
         with patch.object(notifier.client, 'send', return_value='receipt') as send:
             notifier.daily_report('etf_rotation', 'pap', self.summary())
         send.assert_called_once_with(*DailyAccountReport.build('etf_rotation', 'pap', self.summary()))

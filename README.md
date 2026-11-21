@@ -78,7 +78,7 @@ backend/.venv/bin/python backend/main.py
 | `storage.data_dir` | SQLite 账本与 CSV 目录 |
 | `logging` | 日志目录、级别和保留日期数 |
 | `runtime.trade_timeout_seconds` | 交易执行超时阈值，默认 300 秒，仅标记异常 |
-| `pushplus.enabled` | 是否启用执行报告推送；Token 配置在 `pushplus.token` |
+| `pushplus.token` | PushPlus 消息 Token，报告生成后直接发送 |
 
 策略配置位于 `backend/dev/market_trading_bot/config/etf_rotation_strategy.json`：
 

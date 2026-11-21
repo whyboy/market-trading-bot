@@ -20,6 +20,7 @@ class AppTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         (self.root / 'market_trading_bot/config').mkdir(parents=True)
         (self.root / 'market_trading_bot/config/global.json').write_text(json.dumps({
+            'pushplus': {'token': 'test-token'},
             'storage': {'data_dir': 'data'}, 'logging': {'directory': 'logs', 'level': 'INFO', 'retention_dates': 30}}))
         (self.root / 'market_trading_bot/config/example_strategy.json').write_text(json.dumps({
             'strategy': 'example', 'schedule': {'trade_time': '14:30'}, 'instances': [{'id': 'example_pap', 'mode': 'pap', 'enabled': False}]}))
