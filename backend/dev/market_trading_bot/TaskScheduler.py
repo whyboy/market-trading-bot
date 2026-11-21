@@ -77,12 +77,12 @@ class TaskScheduler:
             # 每 5 秒更新服务心跳。
             self.timer.add_job(self._heartbeat, 'interval', seconds=5, id='_heartbeat')
             self.timer.start()
-            self.prepare_calender_context(startup=True)
+            self.prepare_calender_context()
         except BaseException:
             self.stop()
             raise
 
-    def prepare_calender_context(self, startup=False):
+    def prepare_calender_context(self):
         """获取当天交易日历，交易日注册任务；休市日仅记录状态。"""
         if not self.configs or not self.calendar_lock.acquire(blocking=False):
             return
@@ -90,12 +90,10 @@ class TaskScheduler:
             today = self.now().date()
             if self.calendar_prepared_date == today:
                 return
-            context = self._prepare_calendar(today, single_attempt=startup)
+            context = self._prepare_calendar(today)
             if self.stop_event.is_set() or self.now().date() != today:
                 return
             if context is None:
-                if startup:
-                    self.timer.add_job(self.prepare_calender_context, id='_startup_calendar_retry', replace_existing=True)
                 return
             self.calendar_day = today
             self.is_trading_day = context['is_trading_day']
@@ -107,7 +105,7 @@ class TaskScheduler:
         finally:
             self.calendar_lock.release()
 
-    def _prepare_calendar(self, day, single_attempt=False):
+    def _prepare_calendar(self, day):
         """获取交易日历；盘中每 5 秒重试，收盘后最多尝试 3 次。"""
         market = AKShareMarket(self.settings['market'])
         attempts = 0
@@ -119,7 +117,7 @@ class TaskScheduler:
                 attempts += 1
                 self.calendar_error = str(exc)
                 logging.getLogger(__name__).warning('交易日历加载失败：%s', exc)
-                if single_attempt or (started_after_close and attempts >= 3) or self.stop_event.wait(5):
+                if (started_after_close and attempts >= 3) or self.stop_event.wait(5):
                     return None
                 if not started_after_close and self.now().time() >= time(15):
                     return None

@@ -219,15 +219,17 @@ class TaskSchedulerTests(unittest.TestCase):
         finally:
             scheduler.stop()
 
-    def test_startup_calendar_failure_schedules_background_retry(self):
+    def test_startup_calendar_retries_before_scheduling(self):
         self.scheduler.stop()
-        self.calendar.side_effect = ValueError('网络失败')
+        self.calendar.side_effect = [ValueError('网络失败'), [date(2026, 11, 19), date(2026, 11, 20), date(2026, 11, 24)]]
         scheduler = TaskScheduler(self.root)
         try:
-            with patch.object(scheduler.timer, 'start'), patch.object(scheduler.timer, 'add_job') as add_job:
+            with patch.object(scheduler.stop_event, 'wait', return_value=False) as wait:
                 scheduler.start()
-            self.calendar.assert_called_once()
-            self.assertTrue(any(call.kwargs.get('id') == '_startup_calendar_retry' for call in add_job.call_args_list))
+            scheduler.timer.pause()
+            wait.assert_called_once_with(5)
+            self.assertTrue(scheduler.is_trading_day)
+            self.assertIsNotNone(scheduler.timer.get_job('etf_rotation'))
         finally:
             scheduler.stop()
 
