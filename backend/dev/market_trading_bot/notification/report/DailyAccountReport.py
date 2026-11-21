@@ -11,7 +11,7 @@ class DailyAccountReport:
 
     策略：etf_rotation
 
-    账户：etf_rotation_trade_executor
+    账户：etf_rotation_pap
     估值时间：2026-11-20T15:00:00+08:00
     总资产：102,800.00 元
     可用现金：12,350.00 元

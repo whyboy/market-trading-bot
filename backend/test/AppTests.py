@@ -23,7 +23,7 @@ class AppTests(unittest.TestCase):
             'pushplus': {'token': 'test-token'},
             'storage': {'data_dir': 'data'}, 'logging': {'directory': 'logs', 'level': 'INFO', 'retention_dates': 30}}))
         (self.root / 'market_trading_bot/config/example_strategy.json').write_text(json.dumps({
-            'strategy': 'example', 'schedule': {'trade_time': '14:30'}, 'instances': [{'id': 'example_trade_executor', 'mode': 'TradeExecutor', 'enabled': False}]}))
+            'strategy': 'example', 'schedule': {'trade_time': '14:30'}, 'instances': [{'id': 'example_pap', 'mode': 'TradeExecutor', 'enabled': False}]}))
         self.patch = patch.object(app_module, 'ROOT', self.root)
         self.patch.start()
         self.client = TestClient(app_module.app)
@@ -42,7 +42,7 @@ class AppTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def test_missing_account_is_read_only(self):
-        self.assertEqual(self.client.get('/api/accounts/example_trade_executor').json(), {'initialized': False})
+        self.assertEqual(self.client.get('/api/accounts/example_pap').json(), {'initialized': False})
         self.assertFalse((self.root / 'data').exists())
         self.assertEqual(self.client.get('/api/accounts/unknown').status_code, 404)
 
@@ -66,7 +66,7 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/strategies/example/logs/not-a-date').status_code, 422)
 
     def test_latest_account_snapshot(self):
-        database = self.root / 'data/example_trade_executor/ledger.sqlite3'
+        database = self.root / 'data/example_pap/ledger.sqlite3'
         database.parent.mkdir(parents=True)
         with closing(sqlite3.connect(database)) as connection, connection:
             connection.execute('CREATE TABLE daily_results(day TEXT, execution_payload TEXT)')
@@ -74,7 +74,7 @@ class AppTests(unittest.TestCase):
             connection.execute("INSERT INTO account VALUES(1, '100000')")
             connection.execute('INSERT INTO daily_results VALUES(?, ?)', ('2026-11-20', json.dumps({
                 'date': '2026-11-20', 'cash': '50000', 'equity': '101000', 'positions': {}})))
-        result = self.client.get('/api/accounts/example_trade_executor').json()
+        result = self.client.get('/api/accounts/example_pap').json()
         self.assertTrue(result['initialized'])
         self.assertEqual(result['initial_cash'], '100000')
         self.assertEqual(result['equity'], '101000')
@@ -130,7 +130,7 @@ class AppTests(unittest.TestCase):
                     result = client.get('/api/runtime?strategy_id=example').json()
                     self.assertEqual(result['state'], 'running')
                     self.assertEqual(result['heartbeat_scope'], 'task')
-                    task = scheduler.tasks[('example', 'example_trade_executor')]
+                    task = scheduler.tasks[('example', 'example_pap')]
                     heartbeat = task.status['heartbeat_at']
                     task.status['current_execution'] = {**task.status['current_execution'],
                         'started_at': (datetime.now(timezone.utc) - timedelta(seconds=301)).isoformat()}
@@ -141,7 +141,7 @@ class AppTests(unittest.TestCase):
                     self.assertEqual(task.status['heartbeat_at'], heartbeat)
                 finally:
                     release.set()
-                    scheduler.tasks[('example', 'example_trade_executor')].thread.join(timeout=2)
+                    scheduler.tasks[('example', 'example_pap')].thread.join(timeout=2)
                 result = client.get('/api/runtime?strategy_id=example').json()
                 self.assertEqual(result['state'], 'idle')
                 self.assertTrue(result['last_execution']['success'])
@@ -154,13 +154,13 @@ class AppTests(unittest.TestCase):
         first.write_text(json.dumps(config))
         second = self.root / 'market_trading_bot/config/second_strategy.json'
         second.write_text(json.dumps({'strategy': 'second', 'schedule': {'trade_time': '14:30'},
-                                     'instances': [{'id': 'second_trade_executor', 'enabled': True}]}))
+                                     'instances': [{'id': 'second_pap', 'enabled': True}]}))
         entered = threading.Event()
         release = threading.Event()
         finished = threading.Event()
 
         def trade(task):
-            if task.instance_id == 'example_trade_executor':
+            if task.instance_id == 'example_pap':
                 entered.set()
                 release.wait(3)
             else:
@@ -176,6 +176,6 @@ class AppTests(unittest.TestCase):
                     self.assertTrue(entered.wait(2))
                     scheduler._start_trades('second', scheduler.now().date())
                     self.assertTrue(finished.wait(2))
-                    self.assertNotEqual(scheduler.tasks[('example', 'example_trade_executor')].thread.ident, scheduler.tasks[('second', 'second_trade_executor')].thread.ident)
+                    self.assertNotEqual(scheduler.tasks[('example', 'example_pap')].thread.ident, scheduler.tasks[('second', 'second_pap')].thread.ident)
                 finally:
                     release.set()

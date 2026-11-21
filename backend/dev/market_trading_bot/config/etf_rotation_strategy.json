@@ -3,7 +3,7 @@
   "enable": true,
   "instances": [
     {
-      "id": "etf_rotation_trade_executor",
+      "id": "etf_rotation_pap",
       "mode": "TradeExecutor",
       "enabled": true,
       "initial_cash": 100000,

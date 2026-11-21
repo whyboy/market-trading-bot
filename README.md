@@ -92,7 +92,7 @@ backend/.venv/bin/python backend/main.py
 |---|---|---|
 | `enable` | `true`（省略时默认启用） | 是否为此策略创建 TradingTask 线程 |
 | `strategy` | `etf_rotation` | 策略类型 |
-| `instances` | `etf_rotation_trade_executor`；开户资金 100,000 元；佣金率 0.02%；最低佣金 5 元；滑点 0 | 模拟账户与交易费用 |
+| `instances` | `etf_rotation_pap`；开户资金 100,000 元；佣金率 0.02%；最低佣金 5 元；滑点 0 | 模拟账户与交易费用 |
 | `parameters.etf_pool` | `518880.XSHG`、`513100.XSHG`、`159915.XSHE`、`510180.XSHG` | ETF 池 |
 | `parameters.momentum_price_points` | `25` | 动量价格点数量 |
 | `parameters.volatility_price_points` | `20` | 波动率价格点数量 |
@@ -244,7 +244,7 @@ Azure 网络安全组放行 TCP `8080` 后，访问 `http://<服务器公网IP>:
 
 | 路径 | 功能 |
 |---|---|
-| `/api/runtime?strategy_id=etf_rotation&instance_id=etf_rotation_trade_executor` | 后台交易线程状态、心跳、各账户当日计划执行时间与最近结果 |
+| `/api/runtime?strategy_id=etf_rotation&instance_id=etf_rotation_pap` | 后台交易线程状态、心跳、各账户当日计划执行时间与最近结果 |
 | `/api/strategies` | 策略与账户实例列表 |
 | `/api/accounts/{instance_id}` | 最近账户资产与持仓 |
 | `/api/strategies/{strategy_id}/logs` | 日志日期列表，按日期倒序 |
