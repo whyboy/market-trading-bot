@@ -7,8 +7,8 @@ import unittest
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
-from market_trading_bot.TradingScheduler import TradingScheduler
 from market_trading_bot import app as app_module
+from market_trading_bot.TradingScheduler import TradingScheduler
 from pathlib import Path
 from unittest.mock import patch
 
@@ -111,7 +111,7 @@ class AppTests(unittest.TestCase):
             entered.set()
             release.wait(3)
 
-        with patch('market_trading_bot.task.TradingTask.TradingTask.run_pap', side_effect=trade):
+        with patch('market_trading_bot.TradingTask.TradingTask.run_pap', side_effect=trade):
             with TestClient(app_module.app) as client:
                 scheduler = app_module.app.state.scheduler
                 scheduler.calendar_day = scheduler.now().date()
@@ -158,7 +158,7 @@ class AppTests(unittest.TestCase):
             else:
                 finished.set()
 
-        with patch('market_trading_bot.task.TradingTask.TradingTask.run_pap', side_effect=trade):
+        with patch('market_trading_bot.TradingTask.TradingTask.run_pap', side_effect=trade):
             with TestClient(app_module.app):
                 scheduler = app_module.app.state.scheduler
                 scheduler.calendar_day = scheduler.now().date()

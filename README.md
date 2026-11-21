@@ -28,7 +28,7 @@ market-trading-bot/
 │   │       ├── model/                      # 共享数据结构，不依赖业务模块
 │   │       │   ├── MarketSnapshot.py        # MarketSnapshot、DailyClose
 │   │       │   └── StrategyResult.py        # StrategyResult、RankedETF
-│   │       ├── task/TradingTask.py         # 单次策略执行及状态更新
+│   │       ├── TradingTask.py         # 单次策略执行及状态更新
 │   │       ├── strategy/                  # 策略实现
 │   │       │   └── ETFRotationStrategyImpl.py
 │   │       ├── repository/                # 数据库访问

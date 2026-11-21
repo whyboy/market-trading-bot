@@ -6,7 +6,7 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
-from market_trading_bot.task.TradingTask import TradingTask
+from market_trading_bot.TradingTask import TradingTask
 from PapFixture import PapFixture
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -147,10 +147,10 @@ class PapAccountRepositoryTests(PapFixture, unittest.TestCase):
         (self.root / 'market_trading_bot/config/global.json').write_text(json.dumps(global_config))
         path = self.root / 'market_trading_bot/config/strategy.json'
         path.write_text(json.dumps(config))
-        with patch('market_trading_bot.task.TradingTask.strategy_logging'), \
-                patch('market_trading_bot.task.TradingTask.datetime') as clock, \
-                patch('market_trading_bot.task.TradingTask.ETFRotationStrategyImpl') as strategy, \
-                patch('market_trading_bot.task.TradingTask.AKShareMarket') as market:
+        with patch('market_trading_bot.TradingTask.strategy_logging'), \
+                patch('market_trading_bot.TradingTask.datetime') as clock, \
+                patch('market_trading_bot.TradingTask.ETFRotationStrategyImpl') as strategy, \
+                patch('market_trading_bot.TradingTask.AKShareMarket') as market:
             clock.now.return_value = self.signal().as_of
             strategy.return_value.calculate.return_value = self.signal()
             market.return_value.load.return_value = self.signal().as_of, {}
@@ -166,5 +166,5 @@ class PapAccountRepositoryTests(PapFixture, unittest.TestCase):
             self.assertEqual(first['fills'], second['fills'])
         config['instances'][0]['mode'] = 'pro'
         path.write_text(json.dumps(config))
-        with patch('market_trading_bot.task.TradingTask.strategy_logging'), self.assertRaises(ValueError):
+        with patch('market_trading_bot.TradingTask.strategy_logging'), self.assertRaises(ValueError):
             TradingTask(self.root, path).run_pap('pap')
