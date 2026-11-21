@@ -47,6 +47,11 @@ class TaskScheduler:
         self.started_at = datetime.now(timezone.utc).isoformat()
         self.heartbeat_at = self.started_at
 
+    @staticmethod
+    def now():
+        """返回北京时间，统一交易日期与策略执行时间的判断口径。"""
+        return datetime.now(SHANGHAI)
+
     def start(self):
         """取得部署锁并注册定时任务；晚启动补做当天日历、估值和日报。"""
         self.settings = json.loads((self.root / 'market_trading_bot/config/global.json').read_text())
@@ -303,8 +308,3 @@ class TaskScheduler:
     def _heartbeat(self):
         """更新调度服务心跳。"""
         self.heartbeat_at = datetime.now(timezone.utc).isoformat()
-
-    @staticmethod
-    def now():
-        """返回北京时间，统一交易日期与策略执行时间的判断口径。"""
-        return datetime.now(SHANGHAI)
