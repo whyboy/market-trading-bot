@@ -25,7 +25,7 @@ market-trading-bot/
 │   │   └── market_trading_bot/
 │   │       ├── config/                    # 全局与策略配置
 │   │       ├── TradingScheduler.py        # 交易日判断与任务调度
-│   │       ├── model/                      # 共享数据结构，不依赖业务模块
+│   │       ├── data/                      # 共享数据结构，不依赖业务模块
 │   │       │   ├── MarketSnapshot.py        # MarketSnapshot、DailyClose
 │   │       │   └── StrategyResult.py        # StrategyResult、RankedETF
 │   │       ├── TradingTask.py         # 单次策略执行及状态更新
@@ -136,9 +136,22 @@ backend/.venv/bin/python backend/main.py
 - `TradingScheduler` 每天北京时间 **9:00** 加载交易日历，失败每隔 5 秒重试，停止服务或到 15:00 时结束重试。
 - 确认当天为交易日后，按各策略 `schedule.trade_time`（默认 `14:30`）注册当天执行时间；休市日不注册、不创建任务。
 - 9:00 后启动服务会立即补做当天的交易日判断，只安排尚未到时间的策略，不补执行已错过的任务。
-- `enable` 默认为 `true`，设为 `false` 不安排该策略。到点创建一次性的 `TradingTask` 线程，只执行策略和更新自身状态，完成后退出。
-- 同一策略的账户串行执行，不同策略互不阻塞。任务不负责交易日判断或每日调度，账户账本继续防止同日重复成交。
-- 任务状态存储在 `backend/dev/data/runtime/<strategy>/runtime.sqlite3`，页面显示当日计划执行时间、最近执行结果和交易日判断状态。配置修改后重启生效。
+- `enable` 默认为 `true`，设为 `false` 不安排该策略。到点为每个启用的策略账户创建独立 `TradingTask` 线程，完成后退出。
+- 一个策略＋一个账户对应一个 Task；账户间独立执行，同一账户不重叠。调度器为每个 Task 构建独立策略、行情、模拟执行器及 Repository 对象，Task 不读取配置、不构建业务依赖。
+- 任务状态存储在 `backend/dev/data/runtime/<strategy>/<instance_id>/runtime.sqlite3`，页面显示当日计划执行时间、最近执行结果和交易日判断状态。配置修改后重启生效。
+
+交易执行依赖关系：
+
+```text
+TradingScheduler → TradingTask（绑定策略＋账户）
+                    ├── Market → Strategy → StrategyResult
+                    ├── PapExecutor：纯内存模拟调仓
+                    ├── PapAccountRepository：账户事务与CSV导出
+                    └── TaskStatusRepository：该账户任务状态
+```
+
+Repository 不依赖执行器。Task 在账户事务内读取最新快照、检查当日结果、调用执行器并保存；任一步失败整体回滚，保证并发防重复与资金一致性。
+网页选择账户后读取对应任务状态；未指定账户查询时汇总整个策略，任一运行账户超时都会显示异常。
 
 ## 网页运行监控
 
@@ -180,7 +193,7 @@ npm run dev --prefix frontend -- --port 8000 --strictPort
 
 | 路径 | 功能 |
 |---|---|
-| `/api/runtime?strategy_id=etf_rotation` | 后台交易线程状态、心跳、各账户当日计划执行时间与最近结果 |
+| `/api/runtime?strategy_id=etf_rotation&instance_id=etf_rotation_pap` | 后台交易线程状态、心跳、各账户当日计划执行时间与最近结果 |
 | `/api/strategies` | 策略与账户实例列表 |
 | `/api/accounts/{instance_id}` | 最近账户资产与持仓 |
 | `/api/strategies/{strategy_id}/logs` | 日志日期列表，按日期倒序 |

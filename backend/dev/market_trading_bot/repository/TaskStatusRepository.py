@@ -6,9 +6,9 @@ from pathlib import Path
 
 
 class TaskStatusRepository:
-    def __init__(self, root: Path, strategy_id: str):
+    def __init__(self, root: Path, strategy_id: str, instance_id: str):
         settings = json.loads((root / 'market_trading_bot/config/global.json').read_text())
-        self.database = root / settings['storage']['data_dir'] / 'runtime' / strategy_id / 'runtime.sqlite3'
+        self.database = root / settings['storage']['data_dir'] / 'runtime' / strategy_id / instance_id / 'runtime.sqlite3'
 
     def write(self, status: dict):
         self.database.parent.mkdir(parents=True, exist_ok=True)

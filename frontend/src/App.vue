@@ -26,7 +26,7 @@ async function refreshRuntime() {
   const request = ++runtimeRequest
   if (!strategy.value) return
   try {
-    const result = await get<Runtime>(`/api/runtime?strategy_id=${encodeURIComponent(strategy.value)}`)
+    const result = await get<Runtime>(`/api/runtime?strategy_id=${encodeURIComponent(strategy.value)}${instance.value ? `&instance_id=${encodeURIComponent(instance.value)}` : ''}`)
     if (request === runtimeRequest) { runtime.value = result; runtimeError.value = '' }
   } catch {
     if (request === runtimeRequest) { runtime.value = null; runtimeError.value = '监控接口无法连接，请检查 Web 服务。' }
@@ -63,7 +63,7 @@ watch(strategy, () => {
   instance.value = accounts.value[0]?.id ?? ''
   void refreshDates()
 })
-watch(instance, refreshAccount)
+watch(instance, () => { runtime.value = null; void refreshRuntime(); void refreshAccount() })
 let timer: ReturnType<typeof setInterval> | undefined
 onMounted(async () => {
   timer = setInterval(refreshRuntime, 5000)

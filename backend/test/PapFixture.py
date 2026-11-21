@@ -1,10 +1,12 @@
 """模拟账户核心测试使用的共同数据。"""
 from datetime import datetime, timedelta
+from market_trading_bot.data.StrategyResult import RankedETF, StrategyResult
 from market_trading_bot.execution.PapExecutor import PapExecutor
-from market_trading_bot.model.StrategyResult import RankedETF, StrategyResult
 from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
+from market_trading_bot.TradingTask import TradingTask
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import Mock
 from zoneinfo import ZoneInfo
 
 
@@ -24,3 +26,15 @@ class PapFixture:
         ranking = tuple(RankedETF(symbol, 1, .2, price, now, now.date() - timedelta(days=30),
                                   now.date() - timedelta(days=1)) for symbol, price in zip(self.rules, prices))
         return StrategyResult(now, ranking, {symbol: weight if symbol == winner else 0 for symbol in self.rules})
+
+    def make_task(self, signal, executor=None, initial_cash=10000, repository=None):
+        strategy = Mock()
+        strategy.calculate.return_value = signal
+        market = Mock()
+        market.load.return_value = (signal.as_of, {})
+        return TradingTask(strategy, market, executor or self.executor, repository or self.account_store, Mock(),
+                           strategy_id='etf_rotation', instance_id='pap', initial_cash=initial_cash,
+                           scheduled_at=signal.as_of)
+
+    def rebalance(self, signal, executor, initial_cash, repository=None):
+        return self.make_task(signal, executor, initial_cash, repository)._rebalance(signal)

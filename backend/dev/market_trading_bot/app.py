@@ -45,7 +45,7 @@ def strategy_by_id(strategy_id):
 
 
 @app.get('/api/runtime')
-def runtime(strategy_id: str | None = None):
+def runtime(strategy_id: str | None = None, instance_id: str | None = None):
     configurations = strategies()
     if not configurations:
         return {'state': 'unknown', 'online': False}
@@ -53,8 +53,10 @@ def runtime(strategy_id: str | None = None):
     strategy_id = configuration['strategy']
     if not configuration.get('enable', True):
         return {'strategy': strategy_id, 'state': 'disabled', 'online': False}
+    if instance_id and not any(item['id'] == instance_id for item in configuration.get('instances', [])):
+        raise HTTPException(404, '账户不属于所选策略')
     scheduler = getattr(app.state, 'scheduler', None) or TradingScheduler(ROOT)
-    return scheduler.get_status(strategy_id)
+    return scheduler.get_status(strategy_id, instance_id)
 
 
 @app.get('/api/strategies')

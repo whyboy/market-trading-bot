@@ -3,7 +3,7 @@ import json
 import tempfile
 import threading
 import unittest
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from market_trading_bot.market.AKShareMarket import SHANGHAI
 from market_trading_bot.TradingScheduler import TradingScheduler
 from market_trading_bot.TradingTask import TradingTask
@@ -118,7 +118,7 @@ class TradingSchedulerTests(unittest.TestCase):
         self.assertEqual(self.scheduler.tasks, {})
 
     def test_task_only_executes_strategy_and_exits(self):
-        task = TradingTask(self.root, self.path)
+        task = self.scheduler._build_task('etf_rotation', self.config['instances'][0], DUE)
         thread_ids = []
         with patch('market_trading_bot.TradingTask.TradingTask.run_pap', side_effect=lambda *args: thread_ids.append(threading.get_ident())):
             task.start()
@@ -141,27 +141,38 @@ class TradingSchedulerTests(unittest.TestCase):
             self.scheduler._start_task(self.path)
             try:
                 self.assertTrue(entered.wait(2))
-                first = self.scheduler.tasks['etf_rotation']
+                first = self.scheduler.tasks[('etf_rotation', 'etf_rotation_pap')]
                 self.scheduler._start_task(self.path)
-                self.assertIs(self.scheduler.tasks['etf_rotation'], first)
+                self.assertIs(self.scheduler.tasks[('etf_rotation', 'etf_rotation_pap')], first)
             finally:
                 release.set()
                 first.thread.join(timeout=2)
             self.scheduler._start_task(self.path)
-            second = self.scheduler.tasks['etf_rotation']
+            second = self.scheduler.tasks[('etf_rotation', 'etf_rotation_pap')]
             second.thread.join(timeout=2)
             self.assertIsNot(first, second)
 
-    def test_failed_account_does_not_prevent_next_account(self):
+    def test_accounts_have_independent_tasks_and_failures(self):
         self.config['instances'].append({**self.config['instances'][0], 'id': 'second'})
-        self.path.write_text(json.dumps(self.config))
-        task = TradingTask(self.root, self.path)
-        with patch('market_trading_bot.TradingTask.TradingTask.run_pap', side_effect=[ValueError('策略失败'), {}]) as trade:
-            task.start()
-            task.thread.join(timeout=2)
-        self.assertEqual(trade.call_count, 2)
-        self.assertEqual(task.results['etf_rotation_pap']['state'], 'failed')
-        self.assertEqual(task.results['second']['state'], 'success')
+        self.scheduler.configs['etf_rotation'] = self.config
+        self.prepare()
+
+        def trade(task):
+            if task.instance_id == 'etf_rotation_pap':
+                raise ValueError('策略失败')
+            return {}
+
+        with patch.object(TradingTask, 'run_pap', autospec=True, side_effect=trade):
+            self.scheduler._start_task(self.path)
+            for task in self.scheduler.tasks.values():
+                task.thread.join(timeout=2)
+        first = self.scheduler.tasks[('etf_rotation', 'etf_rotation_pap')]
+        second = self.scheduler.tasks[('etf_rotation', 'second')]
+        self.assertEqual(first.result['state'], 'failed')
+        self.assertEqual(second.result['state'], 'success')
+        self.assertIsNot(first.strategy, second.strategy)
+        self.assertIsNot(first.executor, second.executor)
+        self.assertNotEqual(first.status_repository.database, second.status_repository.database)
 
     def test_start_after_nine_schedules_immediate_calendar_check(self):
         self.scheduler.stop()
@@ -191,3 +202,43 @@ class TradingSchedulerTests(unittest.TestCase):
             self.assertFalse(scheduler.tasks)
         finally:
             scheduler.stop()
+
+    def test_same_strategy_accounts_execute_independently_and_report_separate_status(self):
+        self.config['instances'].append({**self.config['instances'][0], 'id': 'second'})
+        self.scheduler.configs['etf_rotation'] = self.config
+        self.prepare()
+        entered = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+
+        def trade(task):
+            if task.instance_id == 'etf_rotation_pap':
+                entered.set()
+                release.wait(3)
+            else:
+                finished.set()
+
+        with patch.object(TradingTask, 'run_pap', autospec=True, side_effect=trade):
+            self.scheduler._start_task(self.path)
+            try:
+                self.assertTrue(entered.wait(2))
+                self.assertTrue(finished.wait(2))
+                first = self.scheduler.tasks[('etf_rotation', 'etf_rotation_pap')]
+                second = self.scheduler.tasks[('etf_rotation', 'second')]
+                second.thread.join(timeout=2)
+                first.status['current_execution'] = {**first.status['current_execution'],
+                    'started_at': (datetime.now(timezone.utc) - timedelta(seconds=301)).isoformat()}
+                first_status = self.scheduler.get_status('etf_rotation', 'etf_rotation_pap')
+                second_status = self.scheduler.get_status('etf_rotation', 'second')
+                self.assertEqual(first_status['health'], 'trade_timeout')
+                self.assertFalse(first_status['online'])
+                self.assertTrue(second_status['online'])
+                self.assertEqual(second_status['last_execution']['instance_id'], 'second')
+                self.assertEqual(self.scheduler.get_status('etf_rotation')['health'], 'trade_timeout')
+                self.assertNotEqual(first.thread.ident, second.thread.ident)
+            finally:
+                release.set()
+
+    def test_factory_rejects_unsupported_execution_mode(self):
+        with self.assertRaises(ValueError):
+            self.scheduler._build_task('etf_rotation', {**self.config['instances'][0], 'mode': 'pro'}, DUE)

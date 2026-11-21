@@ -5,7 +5,12 @@ import logging
 import threading
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime, time, timezone
+from market_trading_bot.execution.PapExecutor import PapExecutor
+from market_trading_bot.log.StrategyLogger import strategy_logging
 from market_trading_bot.market.AKShareMarket import AKShareMarket, SHANGHAI
+from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
+from market_trading_bot.repository.TaskStatusRepository import TaskStatusRepository
+from market_trading_bot.strategy.ETFRotationStrategyImpl import ETFRotationStrategyImpl
 from market_trading_bot.TradingTask import TradingTask
 from pathlib import Path
 
@@ -17,7 +22,7 @@ class TradingScheduler:
     1. 加载 enable=true（默认值）的策略配置，每天北京时间9:00确认交易日。
     2. 日历加载失败时每5秒重试，直到成功、停止服务或当天15:00。
     3. 仅为交易日中尚未到执行时间的策略注册当天任务；9:00后启动会补做判断。
-    4. 到点创建一次性 TradingTask 线程；同策略不重叠，不同策略可并行执行。
+    4. 到点创建一次性 TradingTask 线程；一个策略账户对应一个线程，同账户不重叠，各账户可并行执行。
 
     策略计算、模拟成交及账户记账由 TradingTask 协调，本类负责调度与生命周期。
     对外提供调度服务心跳、交易日判断结果、策略计划和最近任务状态，供网页监控。
@@ -26,7 +31,7 @@ class TradingScheduler:
     def __init__(self, root: Path):
         """准备调度器与运行状态，root为backend/dev目录；调用start才启动服务。"""
         self.root = root
-        self.tasks = {}  # 策略ID -> 最近一次创建的TradingTask（可能已执行完成）
+        self.tasks = {}  # (策略ID, 账户ID) -> 最近一次任务（可能已完成）
         self.configs = {}
         self.paths = {}
         self.calendar_day = None
@@ -122,20 +127,47 @@ class TradingScheduler:
         """更新调度服务心跳；策略执行期间的任务心跳由TradingTask自行维护。"""
         self.heartbeat_at = datetime.now(timezone.utc).isoformat()
 
+    def _build_task(self, strategy_id, instance, scheduled_at):
+        """集中装配依赖；每个策略账户使用独立对象，Task只负责协调执行。"""
+        config = self.configs[strategy_id]
+        if instance['mode'] != 'pap' or config['strategy'] != 'etf_rotation':
+            raise ValueError('当前仅支持ETF轮动模拟账户')
+        return TradingTask(
+            strategy=ETFRotationStrategyImpl(config['parameters']),
+            market=AKShareMarket(self.settings['market']),
+            executor=PapExecutor(instance['execution'], config['instruments']),
+            account_repository=PapAccountRepository(self.root / self.settings['storage']['data_dir'], instance['id']),
+            status_repository=TaskStatusRepository(self.root, strategy_id, instance['id']),
+            strategy_id=strategy_id, instance_id=instance['id'], initial_cash=instance['initial_cash'],
+            scheduled_at=scheduled_at,
+            trade_timeout_seconds=self.settings.get('runtime', {}).get('trade_timeout_seconds', 300),
+            log_context=strategy_logging(self.root, strategy_id, self.settings['logging']))
+
     def _start_task(self, path, day=None):
-        """定时回调：确认当天交易日后创建任务线程，并拦截跨日或同策略重叠执行。"""
+        """到点为每个启用账户创建Task；一个账户运行或装配失败不影响其他账户。"""
         with self.guard:
             if self.stop_event.is_set() or not self.is_trading_day or self.calendar_day != self.now().date():
                 return
             if day is not None and day != self.now().date():
                 return
             strategy_id = json.loads(path.read_text())['strategy']
-            previous = self.tasks.get(strategy_id)
-            if previous is not None and previous.thread.is_alive():
-                return
-            task = TradingTask(self.root, path)
-            task.start()
-            self.tasks[strategy_id] = task
+            config = self.configs[strategy_id]
+            scheduled_at = datetime.combine(self.now().date(), time.fromisoformat(config['schedule']['trade_time']), SHANGHAI)
+            for instance in config.get('instances', []):
+                if self.stop_event.is_set():
+                    break
+                if not instance['enabled']:
+                    continue
+                key = (strategy_id, instance['id'])
+                previous = self.tasks.get(key)
+                if previous is not None and previous.thread.is_alive():
+                    continue
+                try:
+                    task = self._build_task(strategy_id, instance, scheduled_at)
+                    task.start()
+                    self.tasks[key] = task
+                except Exception:
+                    logging.getLogger(__name__).exception('创建任务失败 strategy=%s instance=%s', strategy_id, instance['id'])
 
     def stop(self):
         """停止调度，通知全部任务退出，等待正在执行的工作结束后释放部署锁。"""
@@ -151,35 +183,35 @@ class TradingScheduler:
             self.lock_file.close()
             self.lock_file = None
 
-    def get_status(self, strategy_id: str):
-        """汇总指定策略的监控数据，不触发交易。
-
-        等待执行时展示调度服务心跳，执行中展示任务心跳；超时仅标记异常。
-        返回启动时间、运行时长、日历错误、当日计划和各账户最近执行结果。
-        """
-        task = self.tasks.get(strategy_id)
-        config = self.configs.get(strategy_id, {})
-        active = task is not None and task.thread.is_alive()
-        status = dict(task.status) if task is not None else {}
-        execution = status.get('current_execution')
+    def get_status(self, strategy_id: str, instance_id: str | None = None):
+        """返回所选账户状态；未指定账户时汇总策略，任何运行中账户超时均会显示。"""
+        with self.guard:
+            task_map = dict(self.tasks)
+        tasks = [task for (strategy, instance), task in task_map.items()
+                 if strategy == strategy_id and (instance_id is None or instance == instance_id)]
+        active_tasks = [task for task in tasks if task.thread.is_alive()]
+        task = min(active_tasks, key=lambda value: (value.status.get('current_execution') or value.status.get('last_execution') or {}).get('started_at', self.started_at)) if active_tasks else (
+            max(tasks, key=lambda value: (value.result or {}).get('finished_at', '')) if tasks else None)
+        status = dict(task.status) if task else {}
         now = datetime.now(timezone.utc)
-        execution_age = (now - datetime.fromisoformat(execution['started_at'])).total_seconds() if execution else None
-        timed_out = active and execution_age is not None and execution_age > status.get('trade_timeout_seconds', 300)
-        healthy_scheduler = self.timer.running and (now - datetime.fromisoformat(self.heartbeat_at)).total_seconds() <= 20
+        active_statuses = [dict(value.status) for value in active_tasks]
+        timed_out = any((now - datetime.fromisoformat(value['current_execution']['started_at'])).total_seconds()
+                        > value['trade_timeout_seconds'] for value in active_statuses if value.get('current_execution'))
+        healthy = self.timer.running and (now - datetime.fromisoformat(self.heartbeat_at)).total_seconds() <= 20
         job = self.timer.get_job(strategy_id)
-        results = task.results if task is not None else {}
-        return {**status, 'strategy': strategy_id, 'state': 'running' if active else 'idle',
-                'online': healthy_scheduler and not timed_out,
-                'health': 'trade_timeout' if timed_out else 'idle' if healthy_scheduler else 'stopped',
-                'heartbeat_scope': 'task' if active else 'scheduler',
-                'heartbeat_at': status.get('heartbeat_at') if active else self.heartbeat_at,
+        config = self.configs.get(strategy_id, {})
+        return {**status, 'strategy': strategy_id, 'state': 'running' if active_tasks else 'idle',
+                'online': healthy and not timed_out,
+                'health': 'trade_timeout' if timed_out else 'idle' if healthy else 'stopped',
+                'heartbeat_scope': 'task' if active_tasks else 'scheduler',
+                'heartbeat_at': status.get('heartbeat_at') if active_tasks else self.heartbeat_at,
                 'started_at': self.started_at,
                 'uptime_seconds': (now - datetime.fromisoformat(self.started_at)).total_seconds(),
-                'scheduler_enabled': strategy_id in self.configs,
-                'scheduler_error': self.calendar_error,
+                'scheduler_enabled': strategy_id in self.configs, 'scheduler_error': self.calendar_error,
                 'calendar_day': self.calendar_day.isoformat() if self.calendar_day else None,
                 'is_trading_day': self.is_trading_day if self.calendar_day == self.now().date() else None,
                 'scheduled_tasks': [{'strategy': strategy_id, 'instance_id': instance['id'],
                                      'next_execution_at': job.next_run_time.isoformat() if job and job.next_run_time else None,
-                                     'last_execution': results.get(instance['id'])}
+                                     'last_execution': task_map[(strategy_id, instance['id'])].result
+                                     if (strategy_id, instance['id']) in task_map else None}
                                     for instance in config.get('instances', []) if instance['enabled']]}

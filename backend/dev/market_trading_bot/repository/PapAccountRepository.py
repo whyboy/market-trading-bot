@@ -4,11 +4,8 @@ import json
 import os
 import re
 import sqlite3
-from contextlib import closing
-from dataclasses import asdict
-from decimal import Decimal
-from market_trading_bot.execution.PapExecutor import PapExecutor
-from market_trading_bot.model.StrategyResult import StrategyResult
+from contextlib import closing, contextmanager
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
 
@@ -52,37 +49,46 @@ class PapAccountRepository:
             row = connection.execute('SELECT payload FROM runs WHERE day = ?', (day,)).fetchone()
         return json.loads(row[0]) if row else None
 
-    def rebalance(self, signal: StrategyResult, executor: PapExecutor, initial_cash: float) -> dict:
-        """恢复账户并在同一事务中提交调仓结果；失败回滚，同日重跑返回首次结果。
+    class Transaction:
+        """仅供事务内使用的账户快照与保存入口，不依赖策略或执行器。"""
 
-        :param signal: 本次策略信号，日期用于同日去重。
-        :param executor: 根据目标仓位计算订单、成交及新账户的模拟执行器。
-        :param initial_cash: 仅首次开户使用，按分取整后须大于零。
-        :return: 已提交的账户、订单、成交和信号。
-        """
-        day = signal.as_of.date().isoformat()
+        def __init__(self, connection, day, account, completed):
+            self.connection = connection
+            self.day = day
+            self.account = account
+            self.completed = completed
+            self.saved = False
+
+        def save(self, result: dict) -> dict:
+            if self.completed is not None or result['date'] != self.day:
+                raise ValueError('不能覆盖已完成结果或保存其他日期的结果')
+            payload = json.dumps(result, ensure_ascii=False, default=str, allow_nan=False)
+            self.connection.execute('INSERT INTO runs VALUES (?, ?)', (self.day, payload))
+            self.saved = True
+            return json.loads(payload)
+
+    @contextmanager
+    def transaction(self, day: str, initial_cash: float):
+        """锁定最新账户并检查当日结果，由调用方计算后保存，整体提交或回滚。"""
         with closing(sqlite3.connect(self.database, timeout=30)) as connection, connection:
             connection.execute('BEGIN IMMEDIATE')
             row = connection.execute('SELECT payload FROM runs WHERE day = ?', (day,)).fetchone()
-            if row:
-                return json.loads(row[0])
+            completed = json.loads(row[0]) if row else None
             previous = connection.execute('SELECT payload FROM runs ORDER BY day DESC LIMIT 1').fetchone()
-            if previous:
-                account = json.loads(previous[0])
-            else:
+            account = json.loads(previous[0]) if previous else None
+            if completed is None and account is None:
                 cash = Decimal(str(initial_cash))
                 if not cash.is_finite():
                     raise ValueError('初始资金必须为有限数')
-                cash = executor.money(cash)
+                cash = cash.quantize(Decimal('.01'), rounding=ROUND_HALF_UP)
                 if cash <= 0:
                     raise ValueError('初始资金按分取整后必须大于零')
                 account = {'date': None, 'cash': str(cash), 'positions': {}}
                 connection.execute('INSERT INTO account VALUES (1, ?)', (str(cash),))
-            result = executor.rebalance(signal, account)
-            result['signal'] = asdict(signal)
-            payload = json.dumps(result, ensure_ascii=False, default=str, allow_nan=False)
-            connection.execute('INSERT INTO runs VALUES (?, ?)', (day, payload))
-        return json.loads(payload)
+            transaction = self.Transaction(connection, day, account, completed)
+            yield transaction
+            if completed is None and not transaction.saved:
+                raise RuntimeError('账户事务必须保存执行结果')
 
     @staticmethod
     def _restore_initial_cash(runs: list[dict]) -> Decimal:

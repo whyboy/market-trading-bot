@@ -1,7 +1,7 @@
 """纯内存模拟调仓；账户持久化由 PapAccountRepository 负责。"""
 import math
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP
-from market_trading_bot.model.StrategyResult import StrategyResult
+from market_trading_bot.data.StrategyResult import StrategyResult
 
 
 class PapExecutor:

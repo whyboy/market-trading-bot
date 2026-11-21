@@ -9,8 +9,9 @@ from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from market_trading_bot import app as app_module
 from market_trading_bot.TradingScheduler import TradingScheduler
+from market_trading_bot.TradingTask import TradingTask
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 class AppTests(unittest.TestCase):
@@ -27,8 +28,14 @@ class AppTests(unittest.TestCase):
         self.client = TestClient(app_module.app)
         self.clock_patch = patch.object(TradingScheduler, 'now', return_value=datetime.now().replace(hour=8, minute=0))
         self.clock_patch.start()
+        def build(scheduler, strategy_id, instance, scheduled_at):
+            return TradingTask(Mock(), Mock(), Mock(), Mock(), Mock(), strategy_id=strategy_id,
+                               instance_id=instance['id'], initial_cash=100000, scheduled_at=scheduled_at)
+        self.build_patch = patch.object(TradingScheduler, '_build_task', build)
+        self.build_patch.start()
 
     def tearDown(self):
+        self.build_patch.stop()
         self.clock_patch.stop()
         self.patch.stop()
         self.temporary.cleanup()
@@ -111,7 +118,7 @@ class AppTests(unittest.TestCase):
             entered.set()
             release.wait(3)
 
-        with patch('market_trading_bot.TradingTask.TradingTask.run_pap', side_effect=trade):
+        with patch('market_trading_bot.TradingTask.TradingTask.run_pap', autospec=True, side_effect=trade):
             with TestClient(app_module.app) as client:
                 scheduler = app_module.app.state.scheduler
                 scheduler.calendar_day = scheduler.now().date()
@@ -122,7 +129,7 @@ class AppTests(unittest.TestCase):
                     result = client.get('/api/runtime?strategy_id=example').json()
                     self.assertEqual(result['state'], 'running')
                     self.assertEqual(result['heartbeat_scope'], 'task')
-                    task = scheduler.tasks['example']
+                    task = scheduler.tasks[('example', 'example_pap')]
                     heartbeat = task.status['heartbeat_at']
                     task.status['current_execution'] = {**task.status['current_execution'],
                         'started_at': (datetime.now(timezone.utc) - timedelta(seconds=301)).isoformat()}
@@ -133,7 +140,7 @@ class AppTests(unittest.TestCase):
                     self.assertEqual(task.status['heartbeat_at'], heartbeat)
                 finally:
                     release.set()
-                    scheduler.tasks['example'].thread.join(timeout=2)
+                    scheduler.tasks[('example', 'example_pap')].thread.join(timeout=2)
                 result = client.get('/api/runtime?strategy_id=example').json()
                 self.assertEqual(result['state'], 'idle')
                 self.assertTrue(result['last_execution']['success'])
@@ -151,14 +158,14 @@ class AppTests(unittest.TestCase):
         release = threading.Event()
         finished = threading.Event()
 
-        def trade(instance_id):
-            if instance_id == 'example_pap':
+        def trade(task):
+            if task.instance_id == 'example_pap':
                 entered.set()
                 release.wait(3)
             else:
                 finished.set()
 
-        with patch('market_trading_bot.TradingTask.TradingTask.run_pap', side_effect=trade):
+        with patch('market_trading_bot.TradingTask.TradingTask.run_pap', autospec=True, side_effect=trade):
             with TestClient(app_module.app):
                 scheduler = app_module.app.state.scheduler
                 scheduler.calendar_day = scheduler.now().date()
@@ -168,6 +175,6 @@ class AppTests(unittest.TestCase):
                     self.assertTrue(entered.wait(2))
                     scheduler._start_task(second)
                     self.assertTrue(finished.wait(2))
-                    self.assertNotEqual(scheduler.tasks['example'].thread.ident, scheduler.tasks['second'].thread.ident)
+                    self.assertNotEqual(scheduler.tasks[('example', 'example_pap')].thread.ident, scheduler.tasks[('second', 'second_pap')].thread.ident)
                 finally:
                     release.set()
