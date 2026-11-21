@@ -3,8 +3,6 @@ services:
   trading:
     build: .
     image: market-trading-bot:local
-    environment:
-      PUSHPLUS_TOKEN: "${PUSHPLUS_TOKEN:-}"
     init: true
     restart: unless-stopped
     ports:

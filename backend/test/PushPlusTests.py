@@ -1,5 +1,4 @@
 """通知不得影响交易，发送状态与重试预算必须跨重启保留。"""
-import os
 import tempfile
 import unittest
 from datetime import datetime
@@ -18,10 +17,7 @@ class PushPlusTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        self.settings = {'storage': {'data_dir': 'data'}, 'pushplus': {'enabled': True}}
-        self.environment = patch.dict(os.environ, {'PUSHPLUS_TOKEN': 'test-secret'})
-        self.environment.start()
-        self.addCleanup(self.environment.stop)
+        self.settings = {'storage': {'data_dir': 'data'}, 'pushplus': {'enabled': True, 'token': 'test-secret'}}
 
     def task(self):
         return SimpleNamespace(
@@ -87,8 +83,8 @@ class PushPlusTests(unittest.TestCase):
         self.settings['pushplus']['enabled'] = False
         self.assertIsNone(PushPlusNotifier(self.root, self.settings).repository)
         self.settings['pushplus']['enabled'] = True
-        with patch.dict(os.environ, {'PUSHPLUS_TOKEN': ''}):
-            self.assertIsNone(PushPlusNotifier(self.root, self.settings).repository)
+        self.settings['pushplus']['token'] = ''
+        self.assertIsNone(PushPlusNotifier(self.root, self.settings).repository)
         self.assertFalse((self.root / 'data').exists())
 
     def test_failed_report_does_not_expose_exception(self):

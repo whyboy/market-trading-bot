@@ -1,6 +1,5 @@
 """隔离报告生成与网络发送，发送任务由现有调度器驱动。"""
 import logging
-import os
 from market_trading_bot.PushPlusClient import PushPlusClient
 from market_trading_bot.repository.NotificationRepository import NotificationRepository
 from market_trading_bot.TradingReport import TradingReport
@@ -12,9 +11,9 @@ class PushPlusNotifier:
         self.repository = None
         if not settings.get('pushplus', {}).get('enabled', False):
             return
-        token = os.environ.get('PUSHPLUS_TOKEN', '').strip()
+        token = settings['pushplus']['token'].strip()
         if not token:
-            self.logger.error('PushPlus 已启用但未设置 PUSHPLUS_TOKEN，通知已停用；交易继续运行')
+            self.logger.error('PushPlus 已启用但未设置 pushplus.token，通知已停用；交易继续运行')
             return
         self.client = PushPlusClient(token)
         try:
