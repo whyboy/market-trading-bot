@@ -10,7 +10,7 @@ from decimal import Decimal
 from market_trading_bot.models import RankedETF, StrategyResult
 from market_trading_bot.PapAccountStore import PapAccountStore
 from market_trading_bot.PapExecutor import PapExecutor
-from market_trading_bot.runner import run_pap
+from market_trading_bot.runtime.TradingTask import TradingTask
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
@@ -208,7 +208,7 @@ class PapTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.executor.rebalance(self.signal(), account)
 
-    def test_pap_runner_retries_without_market_and_recovers_csv(self):
+    def test_task_retries_without_market_and_recovers_csv(self):
         (self.root / 'config').mkdir()
         global_config = {'timezone': 'Asia/Shanghai', 'market': {}, 'storage': {'data_dir': 'data'}, 'logging': {}}
         config = {'strategy': 'etf_rotation', 'instances': [{'id': 'pap', 'enabled': True, 'mode': 'pap',
@@ -217,27 +217,27 @@ class PapTests(unittest.TestCase):
         (self.root / 'config/global.json').write_text(json.dumps(global_config))
         path = self.root / 'config/strategy.json'
         path.write_text(json.dumps(config))
-        with patch('market_trading_bot.runner.strategy_logging'), \
-                patch('market_trading_bot.runner.datetime') as clock, \
-                patch('market_trading_bot.runner.ETFRotationStrategy') as strategy, \
-                patch('market_trading_bot.runner.AKShareMarket') as market:
+        with patch('market_trading_bot.runtime.TradingTask.strategy_logging'), \
+                patch('market_trading_bot.runtime.TradingTask.datetime') as clock, \
+                patch('market_trading_bot.runtime.TradingTask.ETFRotationStrategy') as strategy, \
+                patch('market_trading_bot.runtime.TradingTask.AKShareMarket') as market:
             clock.now.return_value = self.signal().as_of
             strategy.return_value.calculate.return_value = self.signal()
             market.return_value.load.return_value = self.signal().as_of, {}
             with patch.object(PapAccountStore, 'export_csv', side_effect=OSError('disk full')):
-                first = run_pap(self.root, path, 'pap')
+                first = TradingTask(self.root, path).run_pap('pap')
             self.assertFalse(first['csv_exported'])
             with patch.object(PapAccountStore, 'export_csv', side_effect=sqlite3.OperationalError('database is locked')):
-                self.assertFalse(run_pap(self.root, path, 'pap')['csv_exported'])
+                self.assertFalse(TradingTask(self.root, path).run_pap('pap')['csv_exported'])
             market.reset_mock()
-            second = run_pap(self.root, path, 'pap')
+            second = TradingTask(self.root, path).run_pap('pap')
             market.assert_not_called()
             self.assertTrue(second['csv_exported'])
             self.assertEqual(first['fills'], second['fills'])
         config['instances'][0]['mode'] = 'pro'
         path.write_text(json.dumps(config))
-        with patch('market_trading_bot.runner.strategy_logging'), self.assertRaises(ValueError):
-            run_pap(self.root, path, 'pap')
+        with patch('market_trading_bot.runtime.TradingTask.strategy_logging'), self.assertRaises(ValueError):
+            TradingTask(self.root, path).run_pap('pap')
 
 
 if __name__ == '__main__':

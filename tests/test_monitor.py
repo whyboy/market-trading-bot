@@ -112,7 +112,7 @@ class MonitorTests(unittest.TestCase):
             entered.set()
             release.wait(3)
 
-        with patch('market_trading_bot.runner.run_pap', side_effect=trade):
+        with patch('market_trading_bot.runtime.TradingTask.TradingTask.run_pap', side_effect=trade):
             with TestClient(web.app) as client:
                 scheduler = web.app.state.scheduler
                 scheduler.calendar_day = scheduler.now().date()
@@ -152,14 +152,14 @@ class MonitorTests(unittest.TestCase):
         release = threading.Event()
         finished = threading.Event()
 
-        def trade(root, path, instance_id):
+        def trade(instance_id):
             if instance_id == 'example_pap':
                 entered.set()
                 release.wait(3)
             else:
                 finished.set()
 
-        with patch('market_trading_bot.runner.run_pap', side_effect=trade):
+        with patch('market_trading_bot.runtime.TradingTask.TradingTask.run_pap', side_effect=trade):
             with TestClient(web.app):
                 scheduler = web.app.state.scheduler
                 scheduler.calendar_day = scheduler.now().date()

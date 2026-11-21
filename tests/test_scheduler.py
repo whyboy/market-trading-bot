@@ -66,7 +66,7 @@ class SchedulerTests(unittest.TestCase):
         self.scheduler.prepare_day()
         self.assertFalse(self.scheduler.is_trading_day)
         self.assertEqual(self.scheduler.jobs, {})
-        with patch('market_trading_bot.runner.run_pap') as trade:
+        with patch('market_trading_bot.runtime.TradingTask.TradingTask.run_pap') as trade:
             self.scheduler._start_task(self.path)
         trade.assert_not_called()
         self.assertEqual(self.scheduler.tasks, {})
@@ -120,7 +120,7 @@ class SchedulerTests(unittest.TestCase):
     def test_task_only_executes_strategy_and_exits(self):
         task = TradingTask(self.root, self.path)
         thread_ids = []
-        with patch('market_trading_bot.runner.run_pap', side_effect=lambda *args: thread_ids.append(threading.get_ident())):
+        with patch('market_trading_bot.runtime.TradingTask.TradingTask.run_pap', side_effect=lambda *args: thread_ids.append(threading.get_ident())):
             task.start()
             task.thread.join(timeout=2)
         self.assertFalse(task.thread.is_alive())
@@ -137,7 +137,7 @@ class SchedulerTests(unittest.TestCase):
             entered.set()
             release.wait(3)
 
-        with patch('market_trading_bot.runner.run_pap', side_effect=trade):
+        with patch('market_trading_bot.runtime.TradingTask.TradingTask.run_pap', side_effect=trade):
             self.scheduler._start_task(self.path)
             try:
                 self.assertTrue(entered.wait(2))
@@ -156,7 +156,7 @@ class SchedulerTests(unittest.TestCase):
         self.config['instances'].append({**self.config['instances'][0], 'id': 'second'})
         self.path.write_text(json.dumps(self.config))
         task = TradingTask(self.root, self.path)
-        with patch('market_trading_bot.runner.run_pap', side_effect=[ValueError('策略失败'), {}]) as trade:
+        with patch('market_trading_bot.runtime.TradingTask.TradingTask.run_pap', side_effect=[ValueError('策略失败'), {}]) as trade:
             task.start()
             task.thread.join(timeout=2)
         self.assertEqual(trade.call_count, 2)
