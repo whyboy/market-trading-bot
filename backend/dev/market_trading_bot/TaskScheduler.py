@@ -92,41 +92,36 @@ class TaskScheduler:
             raise
 
     def prepare_calender_context(self):
-        """获取当天交易日历并保存交易日状态。"""
+        """获取当天交易日历并保存状态；收盘前每 5 秒重试，收盘后最多尝试 3 次。"""
         if not self.configs or not self.calendar_lock.acquire(blocking=False):
             return
         try:
             today = self.now().date()
             if self.calendar_context is not None and self.calendar_context['day'] == today:
                 return
-            context = self._prepare_calendar(today)
-            if self.stop_event.is_set() or self.now().date() != today:
+            market = AKShareMarket(self.settings['market'])
+            attempts = 0
+            started_after_close = self.now().time() >= time(15)
+            while not self.stop_event.is_set() and self.now().date() == today:
+                try:
+                    context = self._load_calendar(today, market)
+                except Exception as exc:
+                    attempts += 1
+                    self.calendar_error = str(exc)
+                    logging.getLogger(__name__).error('交易日历加载失败：%s', exc)
+                    if (started_after_close and attempts >= 3) or self.stop_event.wait(5):
+                        return
+                    if not started_after_close and self.now().time() >= time(15):
+                        return
+                    continue
+                if self.stop_event.is_set() or self.now().date() != today:
+                    return
+                self.calendar_context = context
+                if not context['is_trading_day']:
+                    logging.getLogger(__name__).info('%s 非交易日，跳过交易、估值和日报', today)
                 return
-            if context is None:
-                return
-            self.calendar_context = context
-            if not context['is_trading_day']:
-                logging.getLogger(__name__).info('%s 非交易日，跳过交易、估值和日报', today)
         finally:
             self.calendar_lock.release()
-
-    def _prepare_calendar(self, day):
-        """获取交易日历；盘中每 5 秒重试，收盘后最多尝试 3 次。"""
-        market = AKShareMarket(self.settings['market'])
-        attempts = 0
-        started_after_close = self.now().time() >= time(15)
-        while not self.stop_event.is_set() and self.now().date() == day:
-            try:
-                return self._load_calendar(day, market)
-            except Exception as exc:
-                attempts += 1
-                self.calendar_error = str(exc)
-                logging.getLogger(__name__).error('交易日历加载失败：%s', exc)
-                if (started_after_close and attempts >= 3) or self.stop_event.wait(5):
-                    return None
-                if not started_after_close and self.now().time() >= time(15):
-                    return None
-        return None
 
     def _recover_daily(self, scheduled_day=None):
         """晚启动先补估值；已过15:10时等待补估值结束再发送当天日报。"""
