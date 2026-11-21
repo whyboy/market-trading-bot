@@ -7,7 +7,7 @@ from market_trading_bot.market.AKShareMarket import SHANGHAI
 from market_trading_bot.notification.PushPlusClient import PushPlusClient
 from market_trading_bot.notification.PushPlusNotifier import PushPlusNotifier
 from market_trading_bot.notification.report.TradeExecutionReport import TradeExecutionReport
-from market_trading_bot.TradingTask import TradingTask
+from market_trading_bot.task.TradingTask import TradingTask
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import call, Mock, patch

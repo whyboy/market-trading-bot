@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
-from market_trading_bot.TradingScheduler import TradingScheduler
+from market_trading_bot.TaskScheduler import TaskScheduler
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    scheduler = TradingScheduler(ROOT)
+    scheduler = TaskScheduler(ROOT)
     scheduler.start()
     application.state.scheduler = scheduler
     try:
@@ -40,7 +40,7 @@ def runtime(strategy_id: str | None = None, instance_id: str | None = None):
         return {'strategy': strategy_id, 'state': 'disabled', 'online': False}
     if instance_id and not any(item['id'] == instance_id for item in configuration.get('instances', [])):
         raise HTTPException(404, '账户不属于所选策略')
-    scheduler = getattr(app.state, 'scheduler', None) or TradingScheduler(ROOT)
+    scheduler = getattr(app.state, 'scheduler', None) or TaskScheduler(ROOT)
     return scheduler.get_status(strategy_id, instance_id)
 
 

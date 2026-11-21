@@ -2,8 +2,8 @@
 from datetime import datetime, timedelta
 from market_trading_bot.data.StrategyResult import RankedETF, StrategyResult
 from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
+from market_trading_bot.task.TradingTask import TradingTask
 from market_trading_bot.trader.PapTrader import PapTrader
-from market_trading_bot.TradingTask import TradingTask
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock

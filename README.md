@@ -24,11 +24,14 @@ market-trading-bot/
 │   │   ├── logs/                          # 运行日志，启动后生成
 │   │   └── market_trading_bot/
 │   │       ├── config/                    # 全局与策略配置
-│   │       ├── TradingScheduler.py        # 交易日判断与任务调度
+│   │       ├── TaskScheduler.py           # 交易日判断与任务调度
 │   │       ├── data/                      # 共享数据结构，不依赖业务模块
 │   │       │   ├── MarketSnapshot.py        # MarketSnapshot、DailyClose
 │   │       │   └── StrategyResult.py        # StrategyResult、RankedETF
-│   │       ├── TradingTask.py         # 单次策略执行及状态更新
+│   │       ├── task/                      # 调度器管理的一次性任务
+│   │       │   ├── TradingTask.py          # 单次策略执行及状态更新
+│   │       │   ├── DailyValuationTask.py  # 15:05 更新收盘估值
+│   │       │   └── DailySummaryTask.py    # 15:10 汇总并发送日报
 │   │       ├── strategy/                  # 策略实现
 │   │       │   └── ETFRotationStrategyImpl.py
 │   │       ├── repository/                # 数据库访问
@@ -39,7 +42,7 @@ market-trading-bot/
 │   │       ├── trader/PapTrader.py
 │   │       └── app.py
 │   └── test/                              # 核心测试，不与源码包同名
-│       ├── TradingSchedulerTests.py
+│       ├── TaskSchedulerTests.py
 │       ├── strategy/ETFRotationStrategyImplTests.py
 │       ├── market/AKShareMarketTests.py
 │       ├── repository/PapAccountRepositoryTests.py
@@ -133,7 +136,7 @@ backend/.venv/bin/python backend/main.py
 
 ## 定时执行规则
 
-- `TradingScheduler` 每天北京时间 **9:00** 加载交易日历，失败每隔 5 秒重试，停止服务或到 15:00 时结束重试。
+- `TaskScheduler` 每天北京时间 **9:00** 加载交易日历，失败每隔 5 秒重试，停止服务或到 15:00 时结束重试。
 - 确认当天为交易日后，按各策略 `schedule.trade_time`（默认 `14:30`）注册当天执行时间；休市日不注册、不创建任务。
 - 9:00 后启动服务会立即补做当天的交易日判断，只安排尚未到时间的策略，不补执行已错过的任务。
 - `enable` 默认为 `true`，设为 `false` 不安排该策略。到点为每个启用的策略账户创建独立 `TradingTask` 线程，完成后退出。
@@ -143,7 +146,7 @@ backend/.venv/bin/python backend/main.py
 交易执行依赖关系：
 
 ```text
-TradingScheduler → TradingTask（绑定策略＋账户）
+TaskScheduler → TradingTask（绑定策略＋账户）
                     ├── Market → Strategy → StrategyResult
                     ├── PapTrader：纯内存模拟调仓
                     ├── PapAccountRepository：账户事务与CSV导出
@@ -212,19 +215,22 @@ Azure 网络安全组放行 TCP `8080` 后，访问 `http://<服务器公网IP>:
 | 报告 | 北京时间 | 内容 |
 |---|---|---|
 | 交易执行报告 | 交易日 14:30 策略执行结束后 | 成交、持仓、执行时资产和累计收益；无成交也发送 |
-| 每日收益总结 | 每天 15:05 | 一条消息按策略汇总所有启用的模拟账户，包含收盘资产、当日及累计收益、持仓和买卖笔数；休市日展示最近有效估值 |
+| 每日收益总结 | 每天 15:10 | 一条消息按策略汇总所有启用的模拟账户，包含收盘资产、当日及累计收益、持仓和买卖笔数；休市日展示最近有效估值 |
 
-定时任务统一由 `TradingScheduler` 注册并管理：交易由 `TradingTask` 执行，日报由 `DailySummaryTask` 执行。
+定时任务统一由外层 `TaskScheduler` 注册并管理，任务类集中在 `task/`：
+`TradingTask` 执行交易，`DailyValuationTask` 每天 15:05 更新收盘估值，`DailySummaryTask` 每天 15:10 只读汇总并发送。
 调度器统一获取并缓存当天日历，将是否交易日、上一交易日传给日报任务；任务不重复获取日历。
 报告为纯文本，由 `notification/report/` 中的 `TradeExecutionReport`、`DailyAccountReport` 生成。
 累计收益以账本实际开户资金为基准，包含交易费用。当日收益比较上一交易日收盘资产；首次开户以开户资金为基准。
 收盘快照缺失时按对应日期的历史持仓重建，不将跨日收益当作当日收益。估值使用不复权收盘价和现有模拟账本，不新增分红或份额调整处理。
 
-每日估值保存在数据卷的 `runtime/daily_valuations.sqlite3`，与成交账本分开；不会触发调仓或修改成交记录。
-收盘价尚未更新、日历异常或任务仍在执行时，间隔 30 秒最多尝试 3 次；最终失败在汇总中标注，不影响其他账户；不使用旧价格代替当天收盘价。
+每个账户使用独立的 `data/<instance_id>/ledger.sqlite3`，仅含两张表：
+`account` 保存账户、策略、开户资金和创建时间；`daily_results` 每天一行，分别保存交易结果、收盘估值、收益和估值状态。
+旧 `runs` 表首次写入时在事务中自动迁移，保留交易及开户资金；旧账户无法还原的创建时间留空。估值只更新收盘字段，不覆盖交易结果。
+收盘价尚未更新、日历异常或任务仍在执行时，间隔 30 秒最多尝试 3 次；15:10 汇总时按保存的状态标注未执行、执行中或失败，不影响其他账户；不使用旧价格代替当天收盘价。
 未开户发送“暂无收益数据”；当天策略未完成记账时，按现有持仓估值并注明。
 
-当天 15:05 后启动会补发当天日报，不补发历史日期；同一进程内每天执行一次，重启后可能再次发送。
+15:05 后启动先补估值；已过 15:10 时等待补估值结束再发送当天日报，不补发历史日期；同一进程内每天执行一次，重启后可能再次发送。
 配置位于 `global.json` 的 `pushplus`。消息直接发送、不保存；网络或服务端临时故障最多尝试 3 次，间隔 1、2 秒，配置错误不重试。
 最终发送失败仅记录日志，不影响交易结果；超时重试可能重复送达。
 

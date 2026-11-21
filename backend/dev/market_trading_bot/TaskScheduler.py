@@ -1,30 +1,31 @@
-"""每天按配置创建一次 TradingTask，定时重复由 APScheduler 负责。"""
+"""统一注册和管理交易、收盘估值、日报任务及服务心跳。"""
 import fcntl
 import json
 import logging
 import threading
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime, time, timezone
-from market_trading_bot.DailySummaryTask import DailySummaryTask
 from market_trading_bot.log.StrategyLogger import strategy_logging
 from market_trading_bot.market.AKShareMarket import AKShareMarket, SHANGHAI
 from market_trading_bot.notification.PushPlusNotifier import PushPlusNotifier
 from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
 from market_trading_bot.repository.TaskStatusRepository import TaskStatusRepository
 from market_trading_bot.strategy.ETFRotationStrategyImpl import ETFRotationStrategyImpl
+from market_trading_bot.task.DailySummaryTask import DailySummaryTask
+from market_trading_bot.task.DailyValuationTask import DailyValuationTask
+from market_trading_bot.task.TradingTask import TradingTask
 from market_trading_bot.trader.PapTrader import PapTrader
-from market_trading_bot.TradingTask import TradingTask
 from pathlib import Path
 
 
-class TradingScheduler:
-    """后端的统一调度入口，决定各策略何时创建并执行 TradingTask。
+class TaskScheduler:
+    """后端统一调度入口，负责创建、启动和关闭各类一次性任务。
 
     由 app.py 随服务启动和关闭，使用 APScheduler 管理定时回调：
     1. 加载 enable=true（默认值）的策略配置，每天北京时间9:00确认交易日。
     2. 日历加载失败时每5秒重试，直到成功、停止服务或当天15:00。
     3. 仅为交易日中尚未到执行时间的策略注册当天任务；9:00后启动会补做判断。
-    4. 每天15:05创建 DailySummaryTask，汇总所有策略和账户发送一份日报；晚启动补发。
+    4. 每天15:05创建 DailyValuationTask 更新每日收益，15:10创建 DailySummaryTask 汇总发送。
     5. 到点创建一次性 TradingTask 线程；一个策略账户对应一个线程，同账户不重叠，各账户可并行执行。
 
     策略计算、模拟成交及账户记账由 TradingTask 协调，本类负责调度与生命周期。
@@ -45,6 +46,10 @@ class TradingScheduler:
         self.calendar = ()
         self.calendar_loaded_day = None
         self.daily_summary_task = None
+        self.daily_valuation_task = None
+        self.valuation_day = None
+        self.valuation_guard = threading.Lock()
+        self.daily_context = None
         self.daily_guard = threading.Lock()
         self.reported_day = None
         self.jobs = {}  # 策略ID -> 当天注册的定时回调，与实际交易线程区分
@@ -56,7 +61,7 @@ class TradingScheduler:
         self.heartbeat_at = self.started_at
 
     def start(self):
-        """取得部署锁，加载策略，注册9:00交易计划、15:05日报及每5秒心跳。
+        """取得部署锁，加载策略，注册9:00交易计划、15:05估值、15:10日报及每5秒心跳。
 
         9:00后启动时立即安排一次日历判断，只注册未来的执行时间，不补执行已过期策略。
         启动失败会清理已创建的调度资源并向调用方抛出异常。
@@ -79,7 +84,9 @@ class TradingScheduler:
                     strategy_id = config['strategy']
                     self.configs[strategy_id] = config
                     self.paths[strategy_id] = path
-            self.timer.add_job(self._start_daily_summary_task, 'cron', hour=15, minute=5, id='_daily_report',
+            self.timer.add_job(self._start_daily_valuation_task, 'cron', hour=15, minute=5, id='_daily_valuation',
+                               coalesce=True, max_instances=1, misfire_grace_time=None)
+            self.timer.add_job(self._start_daily_summary_task, 'cron', hour=15, minute=10, id='_daily_report',
                                coalesce=True, max_instances=1, misfire_grace_time=None)
             self.timer.add_job(self.prepare_day, 'cron', hour=9, minute=0, id='_calendar',
                                coalesce=True, max_instances=1, misfire_grace_time=300)
@@ -88,7 +95,7 @@ class TradingScheduler:
             if self.now().time() >= time(9):
                 self.timer.add_job(self.prepare_day, id='_startup_calendar')
             if self.now().time() >= time(15, 5):
-                self.timer.add_job(self._start_daily_summary_task, id='_startup_daily_report')
+                self.timer.add_job(self._recover_daily_tasks, id='_startup_daily_tasks')
         except BaseException:
             self.stop()
             raise
@@ -131,40 +138,75 @@ class TradingScheduler:
         finally:
             self.calendar_guard.release()
 
+    def _start_daily_valuation_task(self):
+        """15:05启动估值任务，只更新 daily_results；同一进程每天启动一次。"""
+        if not self.valuation_guard.acquire(blocking=False):
+            return
+        try:
+            day = self.now().date()
+            if self.stop_event.is_set() or self.now().time() < time(15, 5) or self.valuation_day == day:
+                return
+            if self.daily_valuation_task is not None and self.daily_valuation_task.thread.is_alive():
+                return
+            context = self._daily_context_for(day)
+            if self.stop_event.is_set() or self.now().date() != day:
+                return
+            task = DailyValuationTask(self.root, self.settings, self.configs, context,
+                                      self.stop_event, self._is_task_running, self.now)
+            self.daily_valuation_task = task
+            task.start()
+            self.valuation_day = day
+        finally:
+            self.valuation_guard.release()
+
     def _start_daily_summary_task(self):
-        """每天15:05创建一次性汇总任务；晚启动补发，同一进程内当天只启动一次。"""
+        """15:10只读汇总并推送一次，估值未完成或失败时在报告中注明。"""
         if not self.daily_guard.acquire(blocking=False):
             return
         try:
             day = self.now().date()
-            if self.stop_event.is_set() or self.now().time() < time(15, 5) or self.reported_day == day:
+            if self.stop_event.is_set() or self.now().time() < time(15, 10) or self.reported_day == day:
                 return
             if self.daily_summary_task is not None and self.daily_summary_task.thread.is_alive():
                 return
-            market = AKShareMarket(self.settings['market'])
-            for attempt in range(3):
-                try:
-                    context = self._load_calendar_context(day, market)
-                    break
-                except Exception as exc:
-                    self.calendar_error = str(exc)
-                    logging.getLogger(__name__).warning('日报日历加载失败：%s', exc)
-                    if attempt == 2:
-                        context = {'day': day, 'notice': '交易日历获取失败，未生成收益估值，请查看日志。'}
-                    elif self.stop_event.wait(30):
-                        return
+            context = self._daily_context_for(day)
             if self.stop_event.is_set() or self.now().date() != day:
                 return
-            if 'notice' not in context:
-                self.calendar_day = day
-                self.is_trading_day = context['is_trading_day']
             task = DailySummaryTask(self.root, self.settings, self.configs, self.notifier, context,
-                                    self.stop_event, self._is_task_running, self.now)
+                                    self.stop_event, self.now)
             self.daily_summary_task = task
             task.start()
             self.reported_day = day
         finally:
             self.daily_guard.release()
+
+    def _recover_daily_tasks(self):
+        """晚启动先补估值；已过15:10时等待补估值结束再发送当天日报。"""
+        self._start_daily_valuation_task()
+        if self.now().time() >= time(15, 10):
+            if self.daily_valuation_task is not None:
+                self.daily_valuation_task.thread.join()
+            self._start_daily_summary_task()
+
+    def _daily_context_for(self, day):
+        if self.daily_context is not None and self.daily_context['day'] == day:
+            return self.daily_context
+        market = AKShareMarket(self.settings['market'])
+        for attempt in range(3):
+            try:
+                context = self._load_calendar_context(day, market)
+                break
+            except Exception as exc:
+                self.calendar_error = str(exc)
+                logging.getLogger(__name__).warning('每日任务日历加载失败：%s', exc)
+                if attempt == 2 or self.stop_event.wait(30):
+                    context = {'day': day, 'notice': '交易日历获取失败，未生成收益估值，请查看日志。'}
+                    break
+        if 'notice' not in context:
+            self.calendar_day = day
+            self.is_trading_day = context['is_trading_day']
+        self.daily_context = context
+        return context
 
     def _load_calendar_context(self, day, market):
         """统一加载并缓存当天日历，供交易计划和日报任务共用。"""
@@ -219,7 +261,7 @@ class TradingScheduler:
             strategy=ETFRotationStrategyImpl(config['parameters']),
             market=AKShareMarket(self.settings['market']),
             executor=PapTrader(instance['execution'], config['instruments']),
-            account_repository=PapAccountRepository(self.root / self.settings['storage']['data_dir'], instance['id']),
+            account_repository=PapAccountRepository(self.root / self.settings['storage']['data_dir'], instance['id'], strategy_id),
             status_repository=TaskStatusRepository(self.root, strategy_id, instance['id']),
             strategy_id=strategy_id, instance_id=instance['id'], initial_cash=instance['initial_cash'],
             scheduled_at=scheduled_at, notifier=self.notifier,
@@ -236,8 +278,9 @@ class TradingScheduler:
             self.timer.shutdown(wait=True)
         for task in self.tasks.values():
             task.stop()
-        if self.daily_summary_task is not None:
-            self.daily_summary_task.stop()
+        for task in (self.daily_valuation_task, self.daily_summary_task):
+            if task is not None:
+                task.stop()
         if self.lock_file is not None:
             self.lock_file.close()
             self.lock_file = None

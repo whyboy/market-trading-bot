@@ -1,33 +1,30 @@
-"""一次性日报任务：依据调度器提供的交易日期汇总所有策略和账户并发送。"""
+"""15:05更新账户每日收盘资产及收益，不发送消息、不注册定时任务。"""
 import logging
 import threading
 from datetime import datetime, time
 from decimal import Decimal, ROUND_HALF_UP
 from market_trading_bot.market.AKShareMarket import AKShareMarket, SHANGHAI
-from market_trading_bot.repository.DailyValuationRepository import DailyValuationRepository
 from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
 
 
-class DailySummaryTask:
+class DailyValuationTask:
     class Stopped(RuntimeError):
         pass
 
-    def __init__(self, root, settings, configs, notifier, context, stop_event, is_running, now):
+    def __init__(self, root, settings, configs, context, stop_event, is_running, now):
         self.context = context
-        self.thread = threading.Thread(target=self._run, name='daily-summary-task', daemon=True)
+        self.thread = threading.Thread(target=self._run, name='daily-valuation-task', daemon=True)
         self.completed = False
         self.directory = root / settings['storage']['data_dir']
         self.settings = settings
         self.configs = configs
-        self.notifier = notifier
         self.stop_event = stop_event
         self.is_running = is_running
         self.now = now
-        self.valuations = DailyValuationRepository(self.directory / 'runtime')
         self.logger = logging.getLogger(__name__)
 
     def start(self):
-        """由调度器在15:05创建并启动一次性汇总线程。"""
+        """由调度器在15:05启动一次性估值线程。"""
         self.thread.start()
 
     def stop(self):
@@ -38,62 +35,69 @@ class DailySummaryTask:
         try:
             self.completed = self.run()
         except Exception:
-            self.logger.exception('每日汇总任务失败')
+            self.logger.exception('每日估值任务失败')
 
     def run(self):
-        """汇总所有启用策略及账户，单个账户失败不影响其他账户，最终只发送一份报告。"""
+        """更新所有启用模拟账户的估值状态和收益，失败账户不影响其他账户。"""
         day = self.context['day']
-        accounts = [(strategy_id, instance) for strategy_id, config in sorted(self.configs.items())
-                    for instance in config.get('instances', []) if instance['enabled'] and instance['mode'] == 'pap']
-        summaries = []
-        if self.context.get('notice'):
-            summaries = [{'strategy_id': strategy_id, 'instance_id': instance['id'],
-                          'summary': {'notice': self.context['notice']}} for strategy_id, instance in accounts]
-        elif accounts:
-            market = AKShareMarket(self.settings['market'])
-            for strategy_id, instance in accounts:
+        for strategy_id, config in sorted(self.configs.items()):
+            for instance in config.get('instances', []):
+                if not instance['enabled'] or instance['mode'] != 'pap':
+                    continue
+                if self.stop_event.is_set() or self.now().date() != day:
+                    return False
                 try:
-                    summary = self._retry(lambda: self._summary(market, strategy_id, instance['id']), day)
+                    self._update_account(strategy_id, instance)
                 except self.Stopped:
                     return False
                 except Exception:
-                    self.logger.exception('日报估值失败 strategy=%s instance=%s', strategy_id, instance['id'])
-                    summary = {'notice': '收盘估值失败或交易任务仍在运行，未生成收益，请查看日志。'}
-                summaries.append({'strategy_id': strategy_id, 'instance_id': instance['id'], 'summary': summary})
-        if self.stop_event.is_set() or self.now().date() != day:
-            return False
-        self.notifier.send_daily_summary_report(day, summaries)
+                    self.logger.exception('账户估值处理失败 strategy=%s instance=%s', strategy_id, instance['id'])
         return True
 
-    def _summary(self, market, strategy_id, instance_id):
+    def _update_account(self, strategy_id, instance):
+        day = self.context['day']
+        account = PapAccountRepository.get_account_snapshot_on_or_before(self.directory, instance['id'], day.isoformat())
+        if not account['initialized']:
+            return
+        repository = PapAccountRepository(self.directory, instance['id'], strategy_id)
+        if self.context.get('notice'):
+            repository.mark_valuation_status(day.isoformat(), 'failed', self.context['notice'])
+            return
+        target = day if self.context['is_trading_day'] else self.context['previous_trading_day']
+        if not self.context['is_trading_day'] and PapAccountRepository.find_latest_valuation_on_or_before(self.directory, instance['id'], target.isoformat()):
+            return
+        repository.mark_valuation_status(target.isoformat(), 'running')
+        try:
+            market = AKShareMarket(self.settings['market'])
+            summary = self._retry_valuation(lambda: self._calculate_daily_valuation(market, strategy_id, instance['id'], repository), day)
+            repository.save_daily_valuation(summary)
+        except self.Stopped:
+            raise
+        except Exception:
+            self.logger.exception('收盘估值失败 strategy=%s instance=%s', strategy_id, instance['id'])
+            repository.mark_valuation_status(target.isoformat(), 'failed',
+                                             '收盘估值失败或交易任务仍在运行，未生成收益，请查看日志。')
+
+    def _calculate_daily_valuation(self, market, strategy_id, instance_id, repository):
         day = self.context['day']
         if self.is_running(strategy_id, instance_id):
             raise RuntimeError('交易任务仍在运行')
         account = PapAccountRepository.get_account_snapshot_on_or_before(self.directory, instance_id, day.isoformat())
-        if not account['initialized']:
-            return {'date': day.isoformat(), 'notice': '账户尚未开户，暂无持仓和收益数据。'}
-        trading = self.context['is_trading_day']
-        if not trading:
-            previous = self.valuations.find_latest_on_or_before(instance_id, day.isoformat())
-            if previous is None:
-                close_day = self.context['previous_trading_day']
-                account = PapAccountRepository.get_account_snapshot_on_or_before(self.directory, instance_id, close_day.isoformat())
-                if not account['initialized']:
-                    return {'date': day.isoformat(), 'notice': '今日休市，尚无有效收盘估值。'}
-                previous = self.valuations.save_if_absent(instance_id, self._valuation(market, account, close_day))
-            return {**previous, 'date': day.isoformat(), 'is_trading_day': False}
-        snapshot = self.valuations.find_latest_on_or_before(instance_id, day.isoformat())
-        if snapshot is None or snapshot['date'] != day.isoformat():
-            snapshot = self._valuation(market, account, day)
-            if self.is_running(strategy_id, instance_id):
-                raise RuntimeError('交易任务仍在运行')
-            snapshot = self.valuations.save_if_absent(instance_id, snapshot)
+        if not self.context['is_trading_day']:
+            close_day = self.context['previous_trading_day']
+            account = PapAccountRepository.get_account_snapshot_on_or_before(self.directory, instance_id, close_day.isoformat())
+            if not account['initialized']:
+                raise ValueError('休市日尚无可估值账户')
+            return self._calculate_closing_assets(market, account, close_day)
+        snapshot = self._calculate_closing_assets(market, account, day)
+        if self.is_running(strategy_id, instance_id):
+            raise RuntimeError('交易任务仍在运行')
         previous_day = self.context['previous_trading_day']
-        previous = self.valuations.find_latest_on_or_before(instance_id, previous_day.isoformat())
+        previous = PapAccountRepository.find_latest_valuation_on_or_before(self.directory, instance_id, previous_day.isoformat())
         if previous is None or previous['date'] != previous_day.isoformat():
             previous_account = PapAccountRepository.get_account_snapshot_on_or_before(self.directory, instance_id, previous_day.isoformat())
             if previous_account['initialized']:
-                previous = self.valuations.save_if_absent(instance_id, self._valuation(market, previous_account, previous_day))
+                previous = repository.save_daily_valuation(self._calculate_closing_assets(market, previous_account, previous_day))
             else:
                 previous = {'equity': account['initial_cash'], 'date': '开户资金'}
         baseline = Decimal(previous['equity'])
@@ -107,7 +111,7 @@ class DailySummaryTask:
                 'sell_count': sum(fill['side'] == 'sell' for fill in fills),
                 'execution_note': '' if account['date'] == day.isoformat() else '今日策略未完成记账，按现有持仓估值。'}
 
-    def _valuation(self, market, account, day):
+    def _calculate_closing_assets(self, market, account, day):
         prices = market.closing_prices(account['positions'], day)
         equity = Decimal(account['cash']) + sum((prices[symbol] * position['quantity']
                                                for symbol, position in account['positions'].items()), Decimal('0'))
@@ -120,7 +124,7 @@ class DailySummaryTask:
                 'cumulative_pnl': str(equity - initial),
                 'cumulative_return_pct': str((equity / initial - 1) * 100)}
 
-    def _retry(self, function, day):
+    def _retry_valuation(self, function, day):
         for attempt in range(3):
             if self.stop_event.is_set() or self.now().date() != day:
                 raise self.Stopped()
