@@ -187,6 +187,37 @@ npm run dev --prefix frontend -- --port 8000 --strictPort
 部署时执行 `npm run build --prefix frontend`，只需启动一个后端服务，
 通过 `http://127.0.0.1:8001` 同时访问页面与 API，无需启动前端开发服务。
 
+### Docker 部署（Azure VM）
+
+在项目根目录执行：
+
+```bash
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 -f trading
+curl -f http://127.0.0.1:18080/api/strategies
+```
+
+镜像构建时编译前端，运行时由单个 Python 服务提供页面、API 和定时模拟交易。
+默认仅绑定本机 `127.0.0.1:18080`，可用 `deploy/nginx.conf` 将 Nginx 的 `8000` 端口代理到该服务。
+安装 Nginx 配置前，应先备份并确认现有 `8000` 站点可以被替换，执行 `nginx -t` 后再 reload。
+Azure 网络安全组开放 TCP `8000` 后，通过 `http://<服务器公网IP>:8000` 访问。
+
+如果服务器没有其他服务占用 `8000`，也可以直接公开容器端口：
+
+```bash
+TRADING_BIND_ADDRESS=0.0.0.0 TRADING_PORT=8000 docker compose up -d --build
+```
+
+配置目录以只读方式挂载，修改配置后执行 `docker compose restart trading` 生效。
+账本和日志保存在命名卷 `market-trading-bot_trading-data`、`market-trading-bot_trading-logs` 中，
+重新构建、重建容器和 `docker compose down` 均会保留；不要使用 `docker compose down -v`，它会删除数据。
+已有本地账本不会自动导入命名卷，迁移时需先停止原服务并单独复制数据。
+容器设置自动重启及日志轮转，运行用户为非 root。应用只运行一个实例，不应扩容副本。
+Docker 健康检查确认 API 可响应，交易日判断和执行状态仍应查看 `/api/runtime`。
+
+更新部署使用 `docker compose up -d --build`，停止使用 `docker compose down`。
+
 ### API
 
 以下均为只读 `GET` 接口：
