@@ -16,22 +16,35 @@ ETF 动量轮动程序，启动后按交易日定时模拟调仓，并提供网�
 
 ```text
 market-trading-bot/
-├── frontend/                       # Vue监控页面，开发端口8000
+├── frontend/                              # 前端，开发端口8000
 ├── backend/
-│   ├── main.py                     # 后端启动入口，默认端口8001
-│   ├── requirements.txt            # Python依赖
-│   ├── config/                     # 全局与策略配置
-│   ├── src/market_trading_bot/
-│   │   ├── runtime/                # 调度、策略任务和运行状态
-│   │   ├── web/                    # 网页与只读API
-│   │   ├── strategies/             # 策略实现
-│   │   ├── AKShareMarket.py        # 行情与交易日历
-│   │   ├── PapExecutor.py          # 模拟成交
-│   │   ├── PapAccountStore.py      # 账户账本与CSV导出
-│   │   ├── StrategyLogger.py       # 策略日志
-│   │   └── models.py              # 数据结构
-│   ├── tests/                      # 离线测试
-│   └── data/                       # 账户账本与运行记录
+│   ├── main.py                            # 后端启动入口，默认端口8001
+│   ├── requirements.txt
+│   ├── dev/                               # 后端源码和运行资源，生产环境同样使用
+│   │   ├── logs/                          # 运行日志，启动后生成
+│   │   └── market_trading_bot/
+│   │       ├── config/                    # 全局与策略配置
+│   │       ├── TradingScheduler.py        # 交易日判断与任务调度
+│   │       ├── data/                      # 共享数据结构，不依赖业务模块
+│   │       │   ├── MarketSnapshot.py        # MarketSnapshot、DailyClose
+│   │       │   └── StrategyResult.py        # StrategyResult、RankedETF
+│   │       ├── TradingTask.py         # 单次策略执行及状态更新
+│   │       ├── strategy/                  # 策略实现
+│   │       │   └── ETFRotationStrategyImpl.py
+│   │       ├── repository/                # 数据库访问
+│   │       │   ├── TaskStatusRepository.py
+│   │       │   └── PapAccountRepository.py
+│   │       ├── log/StrategyLogger.py      # 日志处理代码
+│   │       ├── market/AKShareMarket.py
+│   │       ├── trader/PapTrader.py
+│   │       └── app.py
+│   └── test/                              # 核心测试，不与源码包同名
+│       ├── TradingSchedulerTests.py
+│       ├── strategy/ETFRotationStrategyImplTests.py
+│       ├── market/AKShareMarketTests.py
+│       ├── repository/PapAccountRepositoryTests.py
+│       ├── trader/PapTraderTests.py
+│       └── AppTests.py
 ├── AGENTS.md
 └── README.md
 ```
@@ -51,13 +64,13 @@ backend/.venv/bin/python -m pip install -r backend/requirements.txt
 backend/.venv/bin/python backend/main.py
 ```
 
-可通过 `--host`、`--port` 调整监听地址与端口。策略配置从 `backend/config/*_strategy.json` 加载，修改后重启生效。
+可通过 `--host`、`--port` 调整监听地址与端口。策略配置从 `backend/dev/market_trading_bot/config/*_strategy.json` 加载，修改后重启生效。
 
-从旧版目录升级时，先停止服务，再将原 `data/`、`logs/` 内容迁入 `backend/data/`、`backend/logs/`，保留账本与历史日志。
+从旧版目录升级时，先停止服务，将原 `backend/data/`、`backend/logs/` 内容迁入 `backend/dev/data/`、`backend/dev/logs/`，保留账本与历史日志。配置位于 `backend/dev/market_trading_bot/config/`；这些路径不依赖启动时的工作目录。
 
 ## 配置
 
-全局配置位于 `backend/config/global.json`：
+全局配置位于 `backend/dev/market_trading_bot/config/global.json`：
 
 | 配置 | 用途 |
 |---|---|
@@ -67,7 +80,7 @@ backend/.venv/bin/python backend/main.py
 | `runtime.trade_timeout_seconds` | 交易执行超时阈值，默认 300 秒，仅标记异常 |
 | `pushplus` | 预留配置，当前不发送推送 |
 
-策略配置位于 `backend/config/etf_rotation_strategy.json`：
+策略配置位于 `backend/dev/market_trading_bot/config/etf_rotation_strategy.json`：
 
 | 配置 | 默认值 | 用途 |
 |---|---|---|
@@ -88,7 +101,7 @@ backend/.venv/bin/python backend/main.py
 
 ## 账户数据
 
-每个实例的数据保存在 `backend/data/<instance_id>/`：
+`data/` 不作为预置目录提交，运行时按配置自动创建。每个实例的数据保存在 `backend/dev/data/<instance_id>/`：
 
 - `ledger.sqlite3`：权威账本，保存全部运行结果、账户状态、信号、订单和成交。
 - `account_trades.csv`：可重建的查看副本，仅记录发生实际成交的日期。
@@ -116,16 +129,29 @@ backend/.venv/bin/python backend/main.py
 
 ## 日志
 
-日志写入 `backend/logs/<strategy>/YYYY-MM-DD.log`，默认保留最近 30 个有日志的日期。日志包含运行状态、行情区间、报价、策略排名、目标权重和模拟成交摘要，不记录 Token。
+日志写入 `backend/dev/logs/<strategy>/YYYY-MM-DD.log`，默认保留最近 30 个有日志的日期。日志包含运行状态、行情区间、报价、策略排名、目标权重和模拟成交摘要，不记录 Token。
 
 ## 定时执行规则
 
 - `TradingScheduler` 每天北京时间 **9:00** 加载交易日历，失败每隔 5 秒重试，停止服务或到 15:00 时结束重试。
 - 确认当天为交易日后，按各策略 `schedule.trade_time`（默认 `14:30`）注册当天执行时间；休市日不注册、不创建任务。
 - 9:00 后启动服务会立即补做当天的交易日判断，只安排尚未到时间的策略，不补执行已错过的任务。
-- `enable` 默认为 `true`，设为 `false` 不安排该策略。到点创建一次性的 `TradingTask` 线程，只执行策略和更新自身状态，完成后退出。
-- 同一策略的账户串行执行，不同策略互不阻塞。任务不负责交易日判断或每日调度，账户账本继续防止同日重复成交。
-- 任务状态存储在 `backend/data/runtime/<strategy>/runtime.sqlite3`，页面显示当日计划执行时间、最近执行结果和交易日判断状态。配置修改后重启生效。
+- `enable` 默认为 `true`，设为 `false` 不安排该策略。到点为每个启用的策略账户创建独立 `TradingTask` 线程，完成后退出。
+- 一个策略＋一个账户对应一个 Task；账户间独立执行，同一账户不重叠。调度器为每个 Task 构建独立策略、行情、模拟执行器及 Repository 对象，Task 不读取配置、不构建业务依赖。
+- 任务状态存储在 `backend/dev/data/runtime/<strategy>/<instance_id>/runtime.sqlite3`，页面显示当日计划执行时间、最近执行结果和交易日判断状态。配置修改后重启生效。
+
+交易执行依赖关系：
+
+```text
+TradingScheduler → TradingTask（绑定策略＋账户）
+                    ├── Market → Strategy → StrategyResult
+                    ├── PapTrader：纯内存模拟调仓
+                    ├── PapAccountRepository：账户事务与CSV导出
+                    └── TaskStatusRepository：该账户任务状态
+```
+
+Repository 不依赖执行器。Task 在账户事务内读取最新快照、检查当日结果、调用执行器并保存；任一步失败整体回滚，保证并发防重复与资金一致性。
+网页选择账户后读取对应任务状态；未指定账户查询时汇总整个策略，任一运行账户超时都会显示异常。
 
 ## 网页运行监控
 
@@ -167,7 +193,7 @@ npm run dev --prefix frontend -- --port 8000 --strictPort
 
 | 路径 | 功能 |
 |---|---|
-| `/api/runtime?strategy_id=etf_rotation` | 后台交易线程状态、心跳、各账户当日计划执行时间与最近结果 |
+| `/api/runtime?strategy_id=etf_rotation&instance_id=etf_rotation_pap` | 后台交易线程状态、心跳、各账户当日计划执行时间与最近结果 |
 | `/api/strategies` | 策略与账户实例列表 |
 | `/api/accounts/{instance_id}` | 最近账户资产与持仓 |
 | `/api/strategies/{strategy_id}/logs` | 日志日期列表，按日期倒序 |
@@ -178,6 +204,6 @@ npm run dev --prefix frontend -- --port 8000 --strictPort
 ## 验证
 
 ```bash
-PYTHONPATH=backend/src backend/.venv/bin/python -m unittest discover -s backend/tests
+PYTHONPATH=backend/dev backend/.venv/bin/python -m unittest discover -s backend/test -p '*Tests.py'
 npm run build --prefix frontend
 ```

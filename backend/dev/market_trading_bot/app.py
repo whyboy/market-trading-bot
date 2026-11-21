@@ -1,17 +1,17 @@
 """只读监控 API 与构建后的前端页面。"""
 import json
 import re
-import sqlite3
 from asyncio import to_thread
-from contextlib import asynccontextmanager, closing
+from contextlib import asynccontextmanager
 from datetime import date
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from market_trading_bot.runtime.TradingScheduler import TradingScheduler
+from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
+from market_trading_bot.TradingScheduler import TradingScheduler
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @asynccontextmanager
@@ -30,11 +30,11 @@ app = FastAPI(title='交易程序监控', docs_url=None, redoc_url=None, lifespa
 
 
 def settings():
-    return json.loads((ROOT / 'config/global.json').read_text())
+    return json.loads((ROOT / 'market_trading_bot/config/global.json').read_text())
 
 
 def strategies():
-    return [json.loads(path.read_text()) for path in sorted((ROOT / 'config').glob('*_strategy.json'))]
+    return [json.loads(path.read_text()) for path in sorted((ROOT / 'market_trading_bot/config').glob('*_strategy.json'))]
 
 
 def strategy_by_id(strategy_id):
@@ -45,7 +45,7 @@ def strategy_by_id(strategy_id):
 
 
 @app.get('/api/runtime')
-def runtime(strategy_id: str | None = None):
+def runtime(strategy_id: str | None = None, instance_id: str | None = None):
     configurations = strategies()
     if not configurations:
         return {'state': 'unknown', 'online': False}
@@ -53,8 +53,10 @@ def runtime(strategy_id: str | None = None):
     strategy_id = configuration['strategy']
     if not configuration.get('enable', True):
         return {'strategy': strategy_id, 'state': 'disabled', 'online': False}
+    if instance_id and not any(item['id'] == instance_id for item in configuration.get('instances', [])):
+        raise HTTPException(404, '账户不属于所选策略')
     scheduler = getattr(app.state, 'scheduler', None) or TradingScheduler(ROOT)
-    return scheduler.get_status(strategy_id)
+    return scheduler.get_status(strategy_id, instance_id)
 
 
 @app.get('/api/strategies')
@@ -70,18 +72,7 @@ def account(instance_id: str):
         raise HTTPException(404, '账户不存在')
     if not any(instance['id'] == instance_id for item in strategies() for instance in item.get('instances', [])):
         raise HTTPException(404, '账户不存在')
-    database = (ROOT / settings()['storage']['data_dir'] / instance_id / 'ledger.sqlite3').resolve()
-    if not database.exists():
-        return {'initialized': False}
-    with closing(sqlite3.connect(f'{database.as_uri()}?mode=ro', uri=True)) as connection:
-        row = connection.execute('SELECT payload FROM runs ORDER BY day DESC LIMIT 1').fetchone()
-        if row is None:
-            return {'initialized': False}
-        latest = json.loads(row[0])
-        initial = connection.execute('SELECT initial_cash FROM account WHERE id=1').fetchone()
-    return {'initialized': True, 'date': latest['date'], 'as_of': latest.get('signal', {}).get('as_of'),
-            'cash': latest['cash'], 'equity': latest['equity'], 'positions': latest['positions'],
-            'initial_cash': initial[0] if initial else None}
+    return PapAccountRepository.latest(ROOT / settings()['storage']['data_dir'], instance_id)
 
 
 def log_directory(strategy_id):
@@ -113,7 +104,7 @@ def log_content(strategy_id: str, day: date, offset: int = Query(0, ge=0)):
     return {'content': content.decode('utf-8', errors='replace'), 'next_offset': next_offset, 'has_more': has_more}
 
 
-DIST = ROOT.parent / 'frontend/dist'
+DIST = ROOT.parents[1] / 'frontend/dist'
 if (DIST / 'assets').exists():
     app.mount('/assets', StaticFiles(directory=DIST / 'assets'), name='assets')
 
