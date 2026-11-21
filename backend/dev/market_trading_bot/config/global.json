@@ -19,7 +19,10 @@
     "level": "INFO"
   },
   "runtime": {
-    "trade_timeout_seconds": 300,
-    "test_mode": false
+    "trade_timeout_seconds": 300
+  },
+  "schedule": {
+    "calendar_time": "09:00",
+    "valuation_time": "15:05"
   }
 }

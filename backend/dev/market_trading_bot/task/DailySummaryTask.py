@@ -1,4 +1,4 @@
-"""15:10只读每日结果，汇总所有策略和账户发送一份日报。"""
+"""只读每日结果，按配置汇总策略和账户并发送日报。"""
 import logging
 import threading
 from market_trading_bot.service.AccountService import AccountService

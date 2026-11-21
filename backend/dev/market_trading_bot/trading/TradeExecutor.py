@@ -18,7 +18,7 @@ class TradeExecutor:
                 raise ValueError('交易单位必须为正整数，t_plus_one必须为布尔值')
         self.instruments = instruments
 
-    def rebalance(self, signal: StrategyData, account: dict) -> dict:
+    def rebalance(self, signal: StrategyData, account: dict, *, is_trading_day=True) -> dict:
         """使用策略生成的目标权重，按调仓前净资产计算份额；先卖后买，返回成交及新账户。"""
         day = signal.as_of.date().isoformat()
         if account['date'] and day <= account['date']:
@@ -29,8 +29,9 @@ class TradeExecutor:
         weights = signal.target_weights
         if not positions.keys() <= prices.keys():
             raise ValueError('行情必须覆盖所有持仓标的')
-        for position in positions.values():
-            position['sellable'] = position['quantity']
+        if is_trading_day:
+            for position in positions.values():
+                position['sellable'] = position['quantity']
         equity = cash + sum(prices[symbol] * position['quantity'] for symbol, position in positions.items())
         targets = {}
         for symbol, weight in weights.items():
