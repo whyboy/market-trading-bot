@@ -19,15 +19,6 @@ class PapTrader:
                 raise ValueError('交易单位必须为正整数，t_plus_one必须为布尔值')
         self.instruments = instruments
 
-    @staticmethod
-    def money(value: Decimal) -> Decimal:
-        """金额按分四舍五入。"""
-        return value.quantize(Decimal('.01'), rounding=ROUND_HALF_UP)
-
-    def commission(self, amount: Decimal) -> Decimal:
-        """取比例佣金与最低佣金的较大值，再按分四舍五入。"""
-        return self.money(max(amount * self.rate, self.minimum))
-
     def rebalance(self, signal: StrategyResult, account: dict) -> dict:
         """按调仓前净资产计算目标份额，返回新账户与订单、成交，不修改输入。
 
@@ -102,3 +93,12 @@ class PapTrader:
         equity = self.money(cash + sum(prices[symbol] * position['quantity'] for symbol, position in positions.items()))
         return {'date': day, 'cash': str(self.money(cash)), 'positions': positions,
                 'orders': orders, 'fills': fills, 'equity': str(equity)}
+
+    def commission(self, amount: Decimal) -> Decimal:
+        """取比例佣金与最低佣金的较大值，再按分四舍五入。"""
+        return self.money(max(amount * self.rate, self.minimum))
+
+    @staticmethod
+    def money(value: Decimal) -> Decimal:
+        """金额按分四舍五入。"""
+        return value.quantize(Decimal('.01'), rounding=ROUND_HALF_UP)

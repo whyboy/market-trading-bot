@@ -29,21 +29,6 @@ async def lifespan(application: FastAPI):
 app = FastAPI(title='交易程序监控', docs_url=None, redoc_url=None, lifespan=lifespan)
 
 
-def settings():
-    return json.loads((ROOT / 'market_trading_bot/config/global.json').read_text())
-
-
-def strategies():
-    return [json.loads(path.read_text()) for path in sorted((ROOT / 'market_trading_bot/config').glob('*_strategy.json'))]
-
-
-def strategy_by_id(strategy_id):
-    for item in strategies():
-        if item['strategy'] == strategy_id:
-            return item
-    raise HTTPException(404, '策略不存在')
-
-
 @app.get('/api/runtime')
 def runtime(strategy_id: str | None = None, instance_id: str | None = None):
     configurations = strategies()
@@ -73,13 +58,6 @@ def account(instance_id: str):
     if not any(instance['id'] == instance_id for item in strategies() for instance in item.get('instances', [])):
         raise HTTPException(404, '账户不存在')
     return PapAccountRepository.latest(ROOT / settings()['storage']['data_dir'], instance_id)
-
-
-def log_directory(strategy_id):
-    strategy_by_id(strategy_id)
-    if not re.fullmatch(r'[A-Za-z0-9_-]+', strategy_id):
-        raise HTTPException(404, '策略不存在')
-    return ROOT / settings()['logging']['directory'] / strategy_id
 
 
 @app.get('/api/strategies/{strategy_id}/logs')
@@ -114,3 +92,25 @@ def index():
     if not (DIST / 'index.html').exists():
         raise HTTPException(503, '请在项目根目录构建前端：npm ci --prefix frontend && npm run build --prefix frontend')
     return FileResponse(DIST / 'index.html')
+
+
+def log_directory(strategy_id):
+    strategy_by_id(strategy_id)
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', strategy_id):
+        raise HTTPException(404, '策略不存在')
+    return ROOT / settings()['logging']['directory'] / strategy_id
+
+
+def strategy_by_id(strategy_id):
+    for item in strategies():
+        if item['strategy'] == strategy_id:
+            return item
+    raise HTTPException(404, '策略不存在')
+
+
+def strategies():
+    return [json.loads(path.read_text()) for path in sorted((ROOT / 'market_trading_bot/config').glob('*_strategy.json'))]
+
+
+def settings():
+    return json.loads((ROOT / 'market_trading_bot/config/global.json').read_text())

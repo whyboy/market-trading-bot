@@ -79,11 +79,6 @@ class TradingScheduler:
             self.stop()
             raise
 
-    @staticmethod
-    def now():
-        """返回北京时间，统一交易日期与策略执行时间的判断口径。"""
-        return datetime.now(SHANGHAI)
-
     def prepare_day(self):
         """确认当天是否交易，并为各策略注册一次性定时回调，不在此处执行策略。
 
@@ -123,26 +118,6 @@ class TradingScheduler:
         finally:
             self.calendar_guard.release()
 
-    def _heartbeat(self):
-        """更新调度服务心跳；策略执行期间的任务心跳由TradingTask自行维护。"""
-        self.heartbeat_at = datetime.now(timezone.utc).isoformat()
-
-    def _build_task(self, strategy_id, instance, scheduled_at):
-        """集中装配依赖；每个策略账户使用独立对象，Task只负责协调执行。"""
-        config = self.configs[strategy_id]
-        if instance['mode'] != 'pap' or config['strategy'] != 'etf_rotation':
-            raise ValueError('当前仅支持ETF轮动模拟账户')
-        return TradingTask(
-            strategy=ETFRotationStrategyImpl(config['parameters']),
-            market=AKShareMarket(self.settings['market']),
-            executor=PapTrader(instance['execution'], config['instruments']),
-            account_repository=PapAccountRepository(self.root / self.settings['storage']['data_dir'], instance['id']),
-            status_repository=TaskStatusRepository(self.root, strategy_id, instance['id']),
-            strategy_id=strategy_id, instance_id=instance['id'], initial_cash=instance['initial_cash'],
-            scheduled_at=scheduled_at,
-            trade_timeout_seconds=self.settings.get('runtime', {}).get('trade_timeout_seconds', 300),
-            log_context=strategy_logging(self.root, strategy_id, self.settings['logging']))
-
     def _start_task(self, path, day=None):
         """到点为每个启用账户创建Task；一个账户运行或装配失败不影响其他账户。"""
         with self.guard:
@@ -168,6 +143,22 @@ class TradingScheduler:
                     self.tasks[key] = task
                 except Exception:
                     logging.getLogger(__name__).exception('创建任务失败 strategy=%s instance=%s', strategy_id, instance['id'])
+
+    def _build_task(self, strategy_id, instance, scheduled_at):
+        """集中装配依赖；每个策略账户使用独立对象，Task只负责协调执行。"""
+        config = self.configs[strategy_id]
+        if instance['mode'] != 'pap' or config['strategy'] != 'etf_rotation':
+            raise ValueError('当前仅支持ETF轮动模拟账户')
+        return TradingTask(
+            strategy=ETFRotationStrategyImpl(config['parameters']),
+            market=AKShareMarket(self.settings['market']),
+            executor=PapTrader(instance['execution'], config['instruments']),
+            account_repository=PapAccountRepository(self.root / self.settings['storage']['data_dir'], instance['id']),
+            status_repository=TaskStatusRepository(self.root, strategy_id, instance['id']),
+            strategy_id=strategy_id, instance_id=instance['id'], initial_cash=instance['initial_cash'],
+            scheduled_at=scheduled_at,
+            trade_timeout_seconds=self.settings.get('runtime', {}).get('trade_timeout_seconds', 300),
+            log_context=strategy_logging(self.root, strategy_id, self.settings['logging']))
 
     def stop(self):
         """停止调度，通知全部任务退出，等待正在执行的工作结束后释放部署锁。"""
@@ -215,3 +206,12 @@ class TradingScheduler:
                                      'last_execution': task_map[(strategy_id, instance['id'])].result
                                      if (strategy_id, instance['id']) in task_map else None}
                                     for instance in config.get('instances', []) if instance['enabled']]}
+
+    def _heartbeat(self):
+        """更新调度服务心跳；策略执行期间的任务心跳由TradingTask自行维护。"""
+        self.heartbeat_at = datetime.now(timezone.utc).isoformat()
+
+    @staticmethod
+    def now():
+        """返回北京时间，统一交易日期与策略执行时间的判断口径。"""
+        return datetime.now(SHANGHAI)
