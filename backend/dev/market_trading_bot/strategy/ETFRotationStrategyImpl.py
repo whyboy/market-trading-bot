@@ -33,9 +33,11 @@ class ETFRotationStrategyImpl:
         return max(self.momentum_points, self.volatility_points) - 1
 
     def calculate(self, snapshots: dict[str, MarketSnapshot], as_of: datetime) -> StrategyResult:
-        """使用行情层校验后的快照，按年化收益乘 R² 排名，再按目标波动率配仓。
+        """计算动量排名，将最高分标的按目标波动率分配仓位。
 
-        同分沿用 ETF 池顺序；波动率低于 1e-6 时满仓，仓位上限 100%。
+        得分为年化回归收益乘 R²；全部为负仍选最高分，同分按 ETF 池顺序。
+        仓位上限为 100%，年化波动率低于 1e-6 时满仓，其余标的权重为零。
+        输入快照已由行情层校验。
         """
         ranking = []
         for symbol in self.symbols:
