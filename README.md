@@ -140,6 +140,8 @@ backend/.venv/bin/python backend/main.py
 - 一个策略＋一个账户对应一个 Task；账户间独立执行，同一账户不重叠。调度器为每个 Task 构建独立策略、行情、模拟执行器及 Repository 对象，Task 不读取配置、不构建业务依赖。
 - 任务状态存储在 `backend/dev/data/runtime/<strategy>/<instance_id>/runtime.sqlite3`，页面显示当日计划执行时间、最近执行结果和交易日判断状态。配置修改后重启生效。
 
+`TradingScheduler.checkIsTradingDay()` 返回当天交易日判断结果；通过后才注册执行计划，创建 Task 前再次检查。休市或未能确认交易日时不创建 Task。
+
 交易执行依赖关系：
 
 ```text

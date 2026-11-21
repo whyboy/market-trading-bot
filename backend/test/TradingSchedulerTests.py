@@ -71,6 +71,21 @@ class TradingSchedulerTests(unittest.TestCase):
         trade.assert_not_called()
         self.assertEqual(self.scheduler.tasks, {})
 
+    def test_check_returns_boolean_without_creating_tasks(self):
+        self.assertTrue(self.scheduler.checkIsTradingDay())
+        self.assertTrue(self.scheduler.checkIsTradingDay())
+        self.calendar.assert_called_once()
+        self.assertEqual(self.scheduler.jobs, {})
+        self.assertEqual(self.scheduler.tasks, {})
+
+    def test_failed_trading_day_check_prevents_task_construction(self):
+        self.prepare()
+        with patch.object(self.scheduler, 'checkIsTradingDay', return_value=False), \
+                patch.object(self.scheduler, '_build_task') as build:
+            self.scheduler._start_task(self.path)
+        build.assert_not_called()
+        self.assertEqual(self.scheduler.tasks, {})
+
     def test_calendar_failure_waits_five_seconds_then_registers_jobs(self):
         self.calendar.side_effect = [ValueError('网络失败'), [date(2026, 11, 20), date(2026, 11, 24)]]
         with patch.object(self.scheduler.stop_event, 'wait', return_value=False) as wait:
