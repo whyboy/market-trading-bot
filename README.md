@@ -30,8 +30,7 @@ market-trading-bot/
 │   ├── PapExecutor.py              # 模拟成交
 │   ├── PapAccountStore.py          # SQLite 账本与 CSV 导出
 │   ├── StrategyLogger.py           # 运行日志
-│   ├── models.py                   # 领域数据结构
-│   └── report.py                   # 预留日报模块
+│   └── models.py                   # 领域数据结构
 ├── tests/                          # 离线测试
 ├── data/                           # 各实例账户数据
 ├── reports/                        # 预留报告目录
