@@ -7,7 +7,7 @@ from market_trading_bot.market.AKShareMarket import SHANGHAI
 from market_trading_bot.notification.PushPlusClient import PushPlusClient
 from market_trading_bot.notification.PushPlusNotifier import PushPlusNotifier
 from market_trading_bot.notification.report.TradeExecutionReport import TradeExecutionReport
-from market_trading_bot.TradingTask import TradingTask
+from market_trading_bot.task.TradingTask import TradingTask
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import call, Mock, patch
@@ -29,7 +29,7 @@ class PushPlusTests(unittest.TestCase):
                     'equity': '102350', 'cash': '12350',
                     'positions': {}, 'fills': [], 'csv_exported': True},
             account_repository=SimpleNamespace(directory=self.root / 'data/pap',
-                                               latest=lambda *args: {'initial_cash': '100000'}))
+                                               get_latest_account=lambda *args: {'initial_cash': '100000'}))
 
     def test_no_fills_still_sends_report_directly(self):
         notifier = PushPlusNotifier(self.settings)

@@ -16,6 +16,14 @@ class TradingTask:
     def __init__(self, strategy, market, executor, account_repository, status_repository, *,
                  strategy_id, instance_id, initial_cash, scheduled_at, notifier, trade_timeout_seconds=300,
                  log_context=None):
+        """注入策略、行情、交易及存储依赖，创建尚未启动的交易线程。
+
+        :param scheduled_at: 计划执行时间，决定本次交易的记账日期。
+        :param initial_cash: 首次开户资金，已有账户使用账本资金。
+        :param notifier: 策略执行结束后发送报告的通知对象。
+        :param trade_timeout_seconds: 监控超时阈值，不会强制中断交易。
+        :param log_context: 交易日志上下文，省略时使用默认日志。
+        """
         self.strategy = strategy
         self.market = market
         self.executor = executor
@@ -38,14 +46,17 @@ class TradingTask:
         self.notifier = notifier
 
     def start(self):
+        """记录开始时间并启动一次性交易线程。"""
         self.status['current_execution'] = {'instance_id': self.instance_id, 'started_at': self.now().isoformat()}
         self.thread.start()
 
     def stop(self):
+        """发出停止信号并等待线程退出，不强制中断已开始的交易。"""
         self.stop_event.set()
         self.thread.join()
 
     def _run(self):
+        """执行交易并保存运行状态，成功或失败均发送执行报告。"""
         execution = {**self.status['current_execution'], 'scheduled_at': self.scheduled_at.isoformat()}
         try:
             with self.log_context as logger:
@@ -76,7 +87,7 @@ class TradingTask:
 
     def run_pap(self) -> dict:
         """已有当日账本则直接返回，否则获取行情、计算信号并原子调仓。"""
-        committed = self.account_repository.completed(self.scheduled_at.date().isoformat())
+        committed = self.account_repository.find_execution_by_date(self.scheduled_at.date().isoformat())
         if committed is None:
             self.logger.info('获取行情 instance=%s', self.instance_id)
             as_of, snapshots = self.market.load(self.strategy.symbols, self.strategy.history_points)
@@ -90,7 +101,7 @@ class TradingTask:
             committed = self._rebalance(signal)
         output = {'operation': 'pap_rebalance', 'instance_id': self.instance_id, **committed}
         try:
-            self.account_repository.export_csv()
+            self.account_repository.export_trade_summary_csv()
             output['csv_exported'] = True
         except (OSError, sqlite3.Error):
             self.logger.exception('CSV导出失败；账本已提交，可重新导出')
@@ -99,19 +110,27 @@ class TradingTask:
 
     def _rebalance(self, signal):
         # 读取账户、防重复、模拟计算及保存共享同一事务，计算失败回滚全部修改。
-        with self.account_repository.transaction(signal.as_of.date().isoformat(), self.initial_cash) as transaction:
+        """在同一事务中读取账户、模拟调仓并保存，已记账则复用结果。
+
+        :param signal: 含日期、目标仓位和排名的策略信号。
+        :return: 已提交的交易结果。
+        :raises Exception: 计算或保存失败，事务回滚。
+        """
+        with self.account_repository.begin_rebalance_transaction(signal.as_of.date().isoformat(), self.initial_cash) as transaction:
             if transaction.completed is not None:
                 result = transaction.completed
             else:
                 result = self.executor.rebalance(signal, transaction.account)
                 result['signal'] = asdict(signal)
-                result = transaction.save(result)
+                result = transaction.save_execution_result(result)
         return result
 
     def _heartbeat(self):
+        """更新任务心跳并写入运行状态仓库。"""
         self.status['heartbeat_at'] = self.now().isoformat()
         self.status_repository.write(self.status)
 
     @staticmethod
     def now():
+        """返回当前北京时间。"""
         return datetime.now(SHANGHAI)

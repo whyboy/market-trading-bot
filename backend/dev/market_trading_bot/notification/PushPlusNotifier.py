@@ -22,12 +22,16 @@ class PushPlusNotifier:
             self.logger.error('执行报告生成或发送失败 strategy=%s instance=%s；交易结果不受影响',
                               task.strategy_id, task.instance_id)
 
-    def send_daily_account_report(self, strategy_id, instance_id, summary):
-        """接收已计算的每日估值，生成并发送总结。"""
+    def send_daily_summary_report(self, day, summaries):
+        """将所有策略和账户汇总为一份日报并发送，失败仅记录日志。
+
+        :param day: 报告日期。
+        :param summaries: 列表，每项包含 strategy_id、instance_id 和 summary。
+        """
         try:
-            title, content = DailyAccountReport.build(strategy_id, instance_id, summary)
+            title, content = DailyAccountReport.build(day, summaries)
             self.client.send(title, content)
         except PushPlusClient.Error as exc:
             self.logger.error('每日总结发送失败：%s', exc)
         except Exception:
-            self.logger.error('每日总结生成或发送失败 strategy=%s instance=%s', strategy_id, instance_id)
+            self.logger.error('每日总结生成或发送失败 date=%s', day)

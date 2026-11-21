@@ -25,7 +25,7 @@ class PapAccountRepositoryTests(PapFixture, unittest.TestCase):
         with ThreadPoolExecutor(max_workers=4) as pool:
             results = list(pool.map(lambda _: self.rebalance(self.signal(), self.executor, 10000), range(8)))
         self.assertTrue(all(result == results[0] for result in results))
-        self.account_store.export_csv()
+        self.account_store.export_trade_summary_csv()
         with (self.account_store.directory / 'account_trades.csv').open(encoding='utf-8-sig') as stream:
             self.assertEqual(len(list(csv.DictReader(stream))), 1)
 
@@ -35,7 +35,7 @@ class PapAccountRepositoryTests(PapFixture, unittest.TestCase):
         broken.money = self.executor.money
         with self.assertRaises(RuntimeError):
             self.rebalance(self.signal(), broken, 10000)
-        self.assertIsNone(self.account_store.completed('2026-11-20'))
+        self.assertIsNone(self.account_store.find_execution_by_date('2026-11-20'))
         self.assertEqual(len(self.rebalance(self.signal(), self.executor, 10000)['fills']), 1)
 
     def test_failed_insert_rolls_back(self):
@@ -43,16 +43,16 @@ class PapAccountRepositoryTests(PapFixture, unittest.TestCase):
         broken_signal = replace(broken_signal, ranking=(replace(broken_signal.ranking[0], score=float('nan')), *broken_signal.ranking[1:]))
         with self.assertRaises(ValueError):
             self.rebalance(broken_signal, self.executor, 10000)
-        self.assertIsNone(self.account_store.completed('2026-11-20'))
+        self.assertIsNone(self.account_store.find_execution_by_date('2026-11-20'))
 
     def test_exports_can_be_rebuilt_and_instances_are_isolated(self):
         self.rebalance(self.signal(), self.executor, 10000)
-        self.account_store.export_csv()
+        self.account_store.export_trade_summary_csv()
         (self.account_store.directory / 'account_trades.csv').write_text('broken')
-        self.account_store.export_csv()
+        self.account_store.export_trade_summary_csv()
         with (self.account_store.directory / 'account_trades.csv').open(encoding='utf-8-sig') as stream:
             self.assertEqual(next(csv.DictReader(stream))['buy_quantity'], '900')
-        self.assertIsNone(PapAccountRepository(self.root, 'other').completed('2026-11-20'))
+        self.assertIsNone(PapAccountRepository(self.root, 'other').find_execution_by_date('2026-11-20'))
 
     def read_trades(self):
         with (self.account_store.directory / 'account_trades.csv').open(encoding='utf-8-sig') as stream:
@@ -62,11 +62,11 @@ class PapAccountRepositoryTests(PapFixture, unittest.TestCase):
         self.rebalance(self.signal(weight=0), self.executor, 10000)
         with sqlite3.connect(self.account_store.database) as connection:
             self.assertEqual(connection.execute('SELECT initial_cash FROM account').fetchone()[0], '10000.00')
-        self.account_store.export_csv()
+        self.account_store.export_trade_summary_csv()
         self.assertEqual(self.read_trades(), [])
         self.rebalance(self.signal(day=23), self.executor, 999999)
         self.rebalance(self.signal(day=24), self.executor, 999999)
-        self.account_store.export_csv()
+        self.account_store.export_trade_summary_csv()
         rows = self.read_trades()
         self.assertEqual(len(rows), 1)
         row = rows[0]
@@ -81,24 +81,24 @@ class PapAccountRepositoryTests(PapFixture, unittest.TestCase):
         self.assertEqual(row['cumulative_pnl'], '-5.00')
         self.assertEqual(row['cumulative_return_pct'], '-0.050000')
         self.assertEqual(row['net_value'], '0.99950000')
-        self.assertIsNotNone(self.account_store.completed('2026-11-24'))
+        self.assertIsNotNone(self.account_store.find_execution_by_date('2026-11-24'))
 
     def test_legacy_initial_cash_is_restored_and_saved_once(self):
         self.rebalance(self.signal(), self.executor, 10000)
         with sqlite3.connect(self.account_store.database) as connection, connection:
             connection.execute('DELETE FROM account')
-        self.account_store.export_csv()
+        self.account_store.export_trade_summary_csv()
         with sqlite3.connect(self.account_store.database) as connection:
             self.assertEqual(connection.execute('SELECT initial_cash FROM account').fetchone()[0], '10000.00')
-        with patch.object(PapAccountRepository, '_restore_initial_cash', side_effect=AssertionError('不应再次反推')):
-            self.account_store.export_csv()
+        with patch.object(PapAccountRepository, '_infer_initial_cash_from_first_execution', side_effect=AssertionError('不应再次反推')):
+            self.account_store.export_trade_summary_csv()
 
     def test_summary_includes_rotation_and_liquidation(self):
         self.rebalance(self.signal(), self.executor, 10000)
         self.rebalance(self.signal(day=23, winner='B'), self.executor, 10000)
         self.rebalance(self.signal(day=24, weight=0), self.executor, 10000)
         (self.account_store.directory / 'fills.csv').write_text('old export')
-        self.account_store.export_csv()
+        self.account_store.export_trade_summary_csv()
         rows = self.read_trades()
         self.assertEqual(len(rows), 3)
         self.assertEqual(rows[1]['buy_etf'], 'B')
@@ -116,7 +116,7 @@ class PapAccountRepositoryTests(PapFixture, unittest.TestCase):
         self.rebalance(self.signal(), self.executor, 10000)
         self.rebalance(self.signal(day=23, prices=(12, 20)), self.executor, 10000)
         self.rebalance(self.signal(day=24, winner='B', prices=(12, 20)), self.executor, 10000)
-        self.account_store.export_csv()
+        self.account_store.export_trade_summary_csv()
         rows = self.read_trades()
         self.assertEqual([row['date'] for row in rows], ['2026-11-20', '2026-11-24'])
         self.assertEqual(rows[-1]['total_assets'], '11785.00')
@@ -126,22 +126,22 @@ class PapAccountRepositoryTests(PapFixture, unittest.TestCase):
 
     def test_failed_export_preserves_previous_csv(self):
         self.rebalance(self.signal(), self.executor, 10000)
-        self.account_store.export_csv()
+        self.account_store.export_trade_summary_csv()
         path = self.account_store.directory / 'account_trades.csv'
         previous = path.read_bytes()
         self.rebalance(self.signal(day=23, winner='B'), self.executor, 10000)
         with patch.object(Path, 'replace', side_effect=OSError('interrupted')), self.assertRaises(OSError):
-            self.account_store.export_csv()
+            self.account_store.export_trade_summary_csv()
         self.assertEqual(path.read_bytes(), previous)
-        self.account_store.export_csv()
+        self.account_store.export_trade_summary_csv()
         self.assertEqual(len(self.read_trades()), 2)
 
     def test_task_retries_without_market_and_recovers_csv(self):
         task = self.make_task(self.signal())
-        with patch.object(PapAccountRepository, 'export_csv', side_effect=OSError('disk full')):
+        with patch.object(PapAccountRepository, 'export_trade_summary_csv', side_effect=OSError('disk full')):
             first = task.run_pap()
         self.assertFalse(first['csv_exported'])
-        with patch.object(PapAccountRepository, 'export_csv', side_effect=sqlite3.OperationalError('database is locked')):
+        with patch.object(PapAccountRepository, 'export_trade_summary_csv', side_effect=sqlite3.OperationalError('database is locked')):
             self.assertFalse(task.run_pap()['csv_exported'])
         task.market.reset_mock()
         task.strategy.reset_mock()
@@ -153,8 +153,8 @@ class PapAccountRepositoryTests(PapFixture, unittest.TestCase):
 
     def test_transaction_without_result_rolls_back_initial_account(self):
         with self.assertRaisesRegex(RuntimeError, '必须保存'):
-            with self.account_store.transaction('2026-11-20', 10000):
+            with self.account_store.begin_rebalance_transaction('2026-11-20', 10000):
                 pass
-        self.assertIsNone(self.account_store.completed('2026-11-20'))
+        self.assertIsNone(self.account_store.find_execution_by_date('2026-11-20'))
         with sqlite3.connect(self.account_store.database) as connection:
             self.assertIsNone(connection.execute('SELECT initial_cash FROM account').fetchone())

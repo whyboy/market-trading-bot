@@ -5,16 +5,16 @@ import threading
 import unittest
 from datetime import date, datetime, timedelta, timezone
 from market_trading_bot.market.AKShareMarket import SHANGHAI
-from market_trading_bot.TradingScheduler import TradingScheduler
-from market_trading_bot.TradingTask import TradingTask
+from market_trading_bot.task.TradingTask import TradingTask
+from market_trading_bot.TaskScheduler import TaskScheduler
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1] / 'dev'
 DUE = datetime(2026, 11, 20, 14, 30, tzinfo=SHANGHAI)
 
 
-class TradingSchedulerTests(unittest.TestCase):
+class TaskSchedulerTests(unittest.TestCase):
     def setUp(self):
         sender = patch('market_trading_bot.notification.PushPlusClient.PushPlusClient.send', return_value='receipt')
         sender.start()
@@ -27,12 +27,12 @@ class TradingSchedulerTests(unittest.TestCase):
         self.config = json.loads((ROOT / 'market_trading_bot/config/etf_rotation_strategy.json').read_text())
         self.path.write_text(json.dumps(self.config))
         self.current = DUE.replace(hour=8, minute=0)
-        self.clock = patch.object(TradingScheduler, 'now', side_effect=lambda: self.current)
+        self.clock = patch.object(TaskScheduler, 'now', side_effect=lambda: self.current)
         self.clock.start()
-        self.calendar_patch = patch('market_trading_bot.TradingScheduler.AKShareMarket.trading_calendar',
-                                    return_value=[date(2026, 11, 20), date(2026, 11, 24)])
+        self.calendar_patch = patch('market_trading_bot.TaskScheduler.AKShareMarket.trading_calendar',
+                                    return_value=[date(2026, 11, 19), date(2026, 11, 20), date(2026, 11, 24)])
         self.calendar = self.calendar_patch.start()
-        self.scheduler = TradingScheduler(self.root)
+        self.scheduler = TaskScheduler(self.root)
         self.scheduler.start()
         self.scheduler.timer.pause()
 
@@ -69,13 +69,13 @@ class TradingSchedulerTests(unittest.TestCase):
         self.scheduler.prepare_day()
         self.assertFalse(self.scheduler.is_trading_day)
         self.assertEqual(self.scheduler.jobs, {})
-        with patch('market_trading_bot.TradingTask.TradingTask.run_pap') as trade:
+        with patch('market_trading_bot.task.TradingTask.TradingTask.run_pap') as trade:
             self.scheduler._start_task(self.path)
         trade.assert_not_called()
         self.assertEqual(self.scheduler.tasks, {})
 
     def test_calendar_failure_waits_five_seconds_then_registers_jobs(self):
-        self.calendar.side_effect = [ValueError('网络失败'), [date(2026, 11, 20), date(2026, 11, 24)]]
+        self.calendar.side_effect = [ValueError('网络失败'), [date(2026, 11, 19), date(2026, 11, 20), date(2026, 11, 24)]]
         with patch.object(self.scheduler.stop_event, 'wait', return_value=False) as wait:
             self.prepare()
         wait.assert_called_once_with(5)
@@ -83,7 +83,7 @@ class TradingSchedulerTests(unittest.TestCase):
         self.assertIn('etf_rotation', self.scheduler.jobs)
 
     def test_late_calendar_recovery_does_not_run_past_strategy_time(self):
-        self.calendar.side_effect = [ValueError('网络失败'), [date(2026, 11, 20), date(2026, 11, 24)]]
+        self.calendar.side_effect = [ValueError('网络失败'), [date(2026, 11, 19), date(2026, 11, 20), date(2026, 11, 24)]]
 
         def wait(seconds):
             self.current = DUE + timedelta(seconds=1)
@@ -123,7 +123,7 @@ class TradingSchedulerTests(unittest.TestCase):
     def test_task_only_executes_strategy_and_exits(self):
         task = self.scheduler._build_task('etf_rotation', self.config['instances'][0], DUE)
         thread_ids = []
-        with patch('market_trading_bot.TradingTask.TradingTask.run_pap', side_effect=lambda *args: thread_ids.append(threading.get_ident())):
+        with patch('market_trading_bot.task.TradingTask.TradingTask.run_pap', side_effect=lambda *args: thread_ids.append(threading.get_ident())):
             task.start()
             task.thread.join(timeout=2)
         self.assertFalse(task.thread.is_alive())
@@ -140,7 +140,7 @@ class TradingSchedulerTests(unittest.TestCase):
             entered.set()
             release.wait(3)
 
-        with patch('market_trading_bot.TradingTask.TradingTask.run_pap', side_effect=trade):
+        with patch('market_trading_bot.task.TradingTask.TradingTask.run_pap', side_effect=trade):
             self.scheduler._start_task(self.path)
             try:
                 self.assertTrue(entered.wait(2))
@@ -180,7 +180,7 @@ class TradingSchedulerTests(unittest.TestCase):
     def test_start_after_nine_schedules_immediate_calendar_check(self):
         self.scheduler.stop()
         self.current = DUE.replace(hour=10)
-        scheduler = TradingScheduler(self.root)
+        scheduler = TaskScheduler(self.root)
         try:
             with patch.object(scheduler.timer, 'start'), patch.object(scheduler.timer, 'add_job') as add_job:
                 scheduler.start()
@@ -194,7 +194,7 @@ class TradingSchedulerTests(unittest.TestCase):
         config = {**self.config, 'strategy': 'second'}
         (self.root / 'market_trading_bot/config/second_strategy.json').write_text(json.dumps(config))
         (self.root / 'market_trading_bot/config/disabled_strategy.json').write_text(json.dumps({**config, 'strategy': 'disabled', 'enable': False}))
-        scheduler = TradingScheduler(self.root)
+        scheduler = TaskScheduler(self.root)
         scheduler.start()
         scheduler.timer.pause()
         try:
@@ -245,3 +245,39 @@ class TradingSchedulerTests(unittest.TestCase):
     def test_factory_rejects_unsupported_execution_mode(self):
         with self.assertRaises(ValueError):
             self.scheduler._build_task('etf_rotation', {**self.config['instances'][0], 'mode': 'pro'}, DUE)
+
+    def test_valuation_and_summary_have_separate_daily_triggers(self):
+        trigger = self.scheduler.timer.get_job('_daily_report').trigger
+        due = DUE.replace(hour=15, minute=10)
+        valuation = self.scheduler.timer.get_job('_daily_valuation').trigger
+        self.assertEqual(valuation.get_next_fire_time(None, self.current), due.replace(minute=5))
+        self.assertEqual(trigger.get_next_fire_time(None, self.current), due)
+        self.assertEqual(trigger.get_next_fire_time(due, due + timedelta(seconds=1)), due + timedelta(days=1))
+
+    def test_daily_task_is_started_once_per_day_and_shares_calendar(self):
+        self.prepare()
+        self.current = DUE.replace(hour=15, minute=10)
+        with patch('market_trading_bot.TaskScheduler.DailySummaryTask') as task_class:
+            task_class.return_value.thread.is_alive.return_value = False
+            self.scheduler._start_daily_summary_task()
+            self.scheduler._start_daily_summary_task()
+            task_class.assert_called_once()
+            task_class.return_value.start.assert_called_once()
+            self.assertEqual(task_class.call_args.args[4]['previous_trading_day'], date(2026, 11, 19))
+            self.calendar.assert_called_once()
+            self.current += timedelta(days=1)
+            self.scheduler._start_daily_summary_task()
+            self.assertEqual(task_class.call_count, 2)
+            self.assertFalse(task_class.call_args.args[4]['is_trading_day'])
+
+    def test_late_start_waits_for_valuation_before_summary(self):
+        self.current = DUE.replace(hour=16)
+        events = []
+        task = Mock()
+        task.thread.join.side_effect = lambda: events.append('valuation-finished')
+        self.scheduler.daily_valuation_task = task
+        with patch.object(self.scheduler, '_start_daily_valuation_task', side_effect=lambda: events.append('valuation-start')):
+            with patch.object(self.scheduler, '_start_daily_summary_task', side_effect=lambda: events.append('summary-start')):
+                self.scheduler._recover_daily_tasks()
+        self.assertEqual(events, ['valuation-start', 'valuation-finished', 'summary-start'])
+        self.scheduler.daily_valuation_task = None
