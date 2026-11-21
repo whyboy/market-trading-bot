@@ -2,7 +2,7 @@
 import json
 import re
 import sqlite3
-from asyncio import to_thread
+from asyncio import gather, to_thread
 from contextlib import asynccontextmanager, closing
 from datetime import date, datetime, timezone
 from fastapi import FastAPI, HTTPException, Query
@@ -17,14 +17,21 @@ ROOT = Path(__file__).resolve().parents[3]
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    worker = TradingWorker(ROOT)
-    worker.start()
-    application.state.worker = worker
+    workers = {}
+    application.state.workers = workers
     try:
+        for path in sorted((ROOT / 'config').glob('*_strategy.json')):
+            config = json.loads(path.read_text())
+            if config.get('enable', True):
+                worker = TradingWorker(ROOT, path)
+                worker.start()
+                workers[config['strategy']] = worker
         yield
     finally:
-        await to_thread(worker.stop)
-        application.state.worker = None
+        for worker in workers.values():
+            worker.stop_event.set()
+        await gather(*(to_thread(worker.stop) for worker in workers.values()))
+        application.state.workers = None
 
 
 app = FastAPI(title='交易程序监控', docs_url=None, redoc_url=None, lifespan=lifespan)
@@ -46,13 +53,21 @@ def strategy_by_id(strategy_id):
 
 
 @app.get('/api/runtime')
-def runtime():
-    status = RuntimeStore(ROOT).read()
+def runtime(strategy_id: str | None = None):
+    configurations = strategies()
+    if not configurations:
+        return {'state': 'unknown', 'online': False}
+    configuration = strategy_by_id(strategy_id) if strategy_id else configurations[0]
+    strategy_id = configuration['strategy']
+    if not configuration.get('enable', True):
+        return {'strategy': strategy_id, 'state': 'disabled', 'online': False}
+    status = RuntimeStore(ROOT, strategy_id).read()
     if status is None:
         return {'state': 'unknown', 'online': False}
     now = datetime.now(timezone.utc)
     age = max(0, (now - datetime.fromisoformat(status['heartbeat_at'])).total_seconds())
-    worker = getattr(app.state, 'worker', None)
+    workers = getattr(app.state, 'workers', None)
+    worker = workers.get(strategy_id) if workers is not None else None
     if worker is not None:
         status.update(worker.scheduler.snapshot())
     execution = status.get('current_execution')
@@ -72,7 +87,7 @@ def runtime():
 
 @app.get('/api/strategies')
 def list_strategies():
-    return [{'id': item['strategy'], 'instances': [
+    return [{'id': item['strategy'], 'enable': item.get('enable', True), 'instances': [
         {'id': instance['id'], 'mode': instance['mode'], 'enabled': instance['enabled']}
         for instance in item.get('instances', [])]} for item in strategies()]
 

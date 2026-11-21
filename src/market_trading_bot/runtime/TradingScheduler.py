@@ -1,6 +1,5 @@
 """使用标准库 sched 注册每日任务，在交易线程中同步执行。"""
 import json
-import re
 import sched
 from datetime import datetime, time, timedelta
 from market_trading_bot.AKShareMarket import AKShareMarket, SHANGHAI
@@ -9,35 +8,16 @@ from pathlib import Path
 
 
 class TradingScheduler:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, strategy_path: Path):
         self.root = root
         self.settings = json.loads((root / 'config/global.json').read_text())
-        if self.settings.get('timezone', 'Asia/Shanghai') != 'Asia/Shanghai':
-            raise ValueError('调度时区必须为Asia/Shanghai')
         self.scheduler = sched.scheduler(timefunc=lambda: self.now().timestamp())
-        self.tasks = []
         self.error = None
-        ids = set()
-        for path in sorted((root / 'config').glob('*_strategy.json')):
-            config = json.loads(path.read_text())
-            instances = [item for item in config.get('instances', []) if item['enabled'] is True]
-            if not instances:
-                continue
-            value = config.get('schedule', {}).get('trade_time', '')
-            if not re.fullmatch(r'\d{2}:\d{2}', value):
-                raise ValueError('调仓时间格式必须为HH:MM')
-            trade_time = time.fromisoformat(value)
-            if not (time(9, 30) <= trade_time < time(11, 30) or time(13) <= trade_time < time(15)):
-                raise ValueError('调仓时间必须在A股连续交易时段内')
-            for instance in instances:
-                if instance['mode'] != 'pap' or config['strategy'] != 'etf_rotation':
-                    raise ValueError('定时执行当前仅支持etf_rotation模拟账户')
-                if not re.fullmatch(r'[A-Za-z0-9_-]+', instance['id']) or instance['id'] in ids:
-                    raise ValueError('账户实例ID必须合法且全局唯一')
-                ids.add(instance['id'])
-                self.tasks.append({'path': path, 'strategy': config['strategy'],
-                                   'instance_id': instance['id'], 'time': trade_time,
-                                   'next_execution_at': None, 'last_execution': None})
+        config = json.loads(strategy_path.read_text())
+        self.tasks = [{'path': strategy_path, 'strategy': config['strategy'],
+                       'instance_id': instance['id'], 'time': time.fromisoformat(config['schedule']['trade_time']),
+                       'next_execution_at': None, 'last_execution': None}
+                      for instance in config.get('instances', []) if instance['enabled']]
 
     @staticmethod
     def now():

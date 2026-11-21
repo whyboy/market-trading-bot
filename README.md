@@ -48,7 +48,7 @@ python -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 ```
 
-启动后端和定时交易线程（默认端口 `8001`）：
+启动后端和各策略的定时交易线程（默认端口 `8001`）：
 
 ```bash
 .venv/bin/python main.py
@@ -72,6 +72,7 @@ python -m venv .venv
 
 | 配置 | 默认值 | 用途 |
 |---|---|---|
+| `enable` | `true`（省略时默认启用） | 是否为此策略创建 TradingWorker 线程 |
 | `strategy` | `etf_rotation` | 策略类型 |
 | `instances` | `etf_rotation_pap`；开户资金 100,000 元；佣金率 0.02%；最低佣金 5 元；滑点 0 | 模拟账户与交易费用 |
 | `parameters.etf_pool` | `518880.XSHG`、`513100.XSHG`、`159915.XSHE`、`510180.XSHG` | ETF 池 |
@@ -123,7 +124,9 @@ python -m venv .venv
 - 使用 Python 标准库 `sched` 注册每日任务，按各策略 `schedule.trade_time`（北京时间，默认 `14:30`）触发。
 - 到点后加载交易日历；失败则等待 5 秒重试，成功后仅在交易日执行策略。重试可随服务关闭中断，到该交易时段结束时停止。
 - 当天执行时间已经过去才启动程序，则等待明天，不补执行。周末及休市日的计划检查不会成交。
-- 同一后台线程执行日历加载、各账户交易和心跳；任务执行期间暂停心跳。账户账本防止同日重复成交。
+- 每个 `enable=true` 的策略创建一个独立 `TradingWorker` 线程；省略 `enable` 默认启用，设为 `false` 时不创建线程。
+- 同一策略的账户在自己的线程中串行执行，日历加载、交易和心跳也在该线程中完成；各策略互不阻塞。账户账本防止同日重复成交。
+- 各策略心跳单独存储在 `data/runtime/<strategy>/runtime.sqlite3`，网页切换策略时显示对应线程的运行状态。
 - 仅保留心跳、最近执行结果和日志，不保存任务领取或错过窗口记录。页面显示下次计划检查时间，最近执行结果重启后清空。配置修改后重启生效。
 
 ## 网页运行监控
@@ -166,7 +169,7 @@ npm run dev --prefix frontend -- --port 8000 --strictPort
 
 | 路径 | 功能 |
 |---|---|
-| `/api/runtime` | 后台交易线程状态、心跳、各账户下次计划检查时间与最近结果 |
+| `/api/runtime?strategy_id=etf_rotation` | 后台交易线程状态、心跳、各账户下次计划检查时间与最近结果 |
 | `/api/strategies` | 策略与账户实例列表 |
 | `/api/accounts/{instance_id}` | 最近账户资产与持仓 |
 | `/api/strategies/{strategy_id}/logs` | 日志日期列表，按日期倒序 |

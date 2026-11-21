@@ -1,5 +1,6 @@
 {
   "strategy": "etf_rotation",
+  "enable": true,
   "instances": [
     {
       "id": "etf_rotation_pap",

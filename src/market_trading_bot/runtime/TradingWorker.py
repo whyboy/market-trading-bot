@@ -14,10 +14,11 @@ from queue import Empty, Queue
 class TradingWorker:
     """同一线程串行执行交易与心跳；文件锁避免重复启动。"""
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, strategy_path: Path):
         self.root = root
-        self.scheduler = TradingScheduler(root)
-        self.store = RuntimeStore(root)
+        self.strategy_id = json.loads(strategy_path.read_text())['strategy']
+        self.scheduler = TradingScheduler(root, strategy_path)
+        self.store = RuntimeStore(root, self.strategy_id)
         self.tasks = Queue()
         self.ready = threading.Event()
         settings = json.loads((root / 'config/global.json').read_text())
@@ -25,9 +26,9 @@ class TradingWorker:
         if not isinstance(timeout, (int, float)) or not 0 < timeout < float('inf'):
             raise ValueError('交易超时时间必须为有限正数')
         self.stop_event = threading.Event()
-        self.thread = threading.Thread(target=self._run, name='trading-worker', daemon=True)
+        self.thread = threading.Thread(target=self._run, name=f'trading-worker-{self.strategy_id}', daemon=True)
         self.lock = None
-        self.status = {'run_id': str(uuid.uuid4()), 'pid': os.getpid(),
+        self.status = {'strategy': self.strategy_id, 'run_id': str(uuid.uuid4()), 'pid': os.getpid(),
                        'started_at': datetime.now(timezone.utc).isoformat(), 'state': 'idle',
                        'last_execution': None, 'current_execution': None,
                        'trade_timeout_seconds': timeout, 'scheduler_enabled': False}
