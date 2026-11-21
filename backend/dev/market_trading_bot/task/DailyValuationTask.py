@@ -60,6 +60,10 @@ class DailyValuationTask:
         if not account['initialized']:
             return
         repository = PapAccountRepository(self.directory, instance['id'], strategy_id)
+        result = PapAccountRepository.get_daily_result(self.directory, instance['id'], day.isoformat())
+        # 重启复用已完成的估值；后续交易记账会将其置为 pending，届时重新计算。
+        if result and result['valuation_status'] == 'success' and result['valuation'] is not None:
+            return
         if self.context.get('notice'):
             repository.mark_valuation_status(day.isoformat(), 'failed', self.context['notice'])
             return

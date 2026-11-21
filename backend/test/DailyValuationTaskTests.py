@@ -63,6 +63,29 @@ class DailyValuationTaskTests(unittest.TestCase):
         self.assertEqual(result['execution'], execution)
         self.market.trading_calendar.assert_not_called()
 
+    def test_restart_preserves_successful_valuation_when_market_or_calendar_is_unavailable(self):
+        self.save_account(self.day)
+        self.run_task()
+        saved = self.result()
+        self.market.closing_prices.reset_mock()
+        self.market.closing_prices.side_effect = TimeoutError('temporary outage')
+        for context in (self.context, {'day': self.day, 'notice': '交易日历获取失败'}):
+            self.task = DailyValuationTask(self.root, self.settings, self.configs, context,
+                                           self.stop, self.running, lambda: self.current)
+            self.assertTrue(self.run_task())
+            self.assertEqual(self.result(), saved)
+        self.market.closing_prices.assert_not_called()
+
+    def test_execution_invalidating_valuation_is_recalculated(self):
+        self.save_account(date(2026, 11, 19), cash='90000', quantity=100)
+        self.run_task()
+        self.assertEqual(self.result()['valuation']['equity'], '100500.00')
+        self.save_account(self.day)
+        self.assertEqual(self.result()['valuation_status'], 'pending')
+        self.run_task()
+        self.assertEqual(self.result()['valuation_status'], 'success')
+        self.assertEqual(self.result()['valuation']['equity'], '100995.00')
+
     def test_prior_close_is_rebuilt_using_historical_not_current_holdings(self):
         self.save_account(date(2026, 11, 19), cash='90000', quantity=100)
         self.save_account(self.day)
