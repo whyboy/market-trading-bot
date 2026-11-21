@@ -3,14 +3,14 @@ import pandas as pd
 import unittest
 from datetime import date, datetime
 from market_trading_bot.market.HttpMarket import HttpMarket
-from market_trading_bot.market.MarketSource import MarketSource
+from market_trading_bot.market.MarketProvider import MarketProvider
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 
-class MarketSourceTests(unittest.TestCase):
+class MarketProviderTests(unittest.TestCase):
     def test_missing_baostock_day_uses_tencent_qfq(self):
-        source = MarketSource(15)
+        source = MarketProvider(15)
         missing = pd.DataFrame({'日期': ['2026-11-19'], '收盘': ['2.30']})
         expected = pd.DataFrame({'日期': ['2026-11-20'], '收盘': ['2.23']})
         with patch.object(source.baostock, 'daily', return_value=missing), \
@@ -24,7 +24,7 @@ class MarketSourceTests(unittest.TestCase):
         fields[2], fields[3], fields[30] = '159915', '2.230', '20261120143000'
         response = Mock(text=f'v_sz159915="{"~".join(fields)}";')
         now = datetime(2026, 11, 20, 14, 30, 10, tzinfo=ZoneInfo('Asia/Shanghai'))
-        source = MarketSource(15)
+        source = MarketProvider(15)
         with patch('market_trading_bot.market.HttpMarket.requests.get', side_effect=[Mock(text=''), response]):
             self.assertEqual(source.quotes(['159915.XSHE'], lambda: now, 60)['159915.XSHE'][0], 2.23)
 

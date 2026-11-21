@@ -6,7 +6,7 @@ from market_trading_bot.market.BaoStockDaily import BaoStockDaily
 from market_trading_bot.market.HttpMarket import HttpMarket
 
 
-class MarketSource:
+class MarketProvider:
     def __init__(self, timeout, logger=None):
         self.logger = logger or logging.getLogger(__name__)
         self.baostock = BaoStockDaily(timeout)
