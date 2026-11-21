@@ -2,7 +2,7 @@
 from decimal import Decimal
 
 
-class TradingReport:
+class TradeExecutionReport:
     @staticmethod
     def build(task):
         result = task.result

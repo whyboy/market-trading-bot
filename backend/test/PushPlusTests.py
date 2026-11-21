@@ -5,7 +5,7 @@ from datetime import datetime
 from market_trading_bot.market.AKShareMarket import SHANGHAI
 from market_trading_bot.notification.PushPlusClient import PushPlusClient
 from market_trading_bot.notification.PushPlusNotifier import PushPlusNotifier
-from market_trading_bot.notification.TradingReport import TradingReport
+from market_trading_bot.notification.TradeExecutionReport import TradeExecutionReport
 from market_trading_bot.TradingTask import TradingTask
 from pathlib import Path
 from types import SimpleNamespace
@@ -34,7 +34,7 @@ class PushPlusTests(unittest.TestCase):
         notifier = PushPlusNotifier(self.root, self.settings)
         notifier.report(self.task())
         notifier.report(self.task())
-        title, content = TradingReport.build(self.task())
+        title, content = TradeExecutionReport.build(self.task())
         self.assertIn('今日无调仓', content)
         self.assertIn('+2.35%', content)
         self.assertIn('非收盘收益', content)
@@ -90,7 +90,7 @@ class PushPlusTests(unittest.TestCase):
     def test_failed_report_does_not_expose_exception(self):
         task = self.task()
         task.result.update(success=False, error='secret-token-in-url')
-        title, content = TradingReport.build(task)
+        title, content = TradeExecutionReport.build(task)
         self.assertIn('失败', title)
         self.assertNotIn('102350', content)
         self.assertNotIn('secret-token', content)
@@ -112,7 +112,7 @@ class PushPlusTests(unittest.TestCase):
                            instance_id='pap', initial_cash=100000,
                            scheduled_at=datetime(2026, 11, 20, 14, 30, tzinfo=SHANGHAI), notifier=notifier)
         with patch.object(task, 'run_pap', return_value={'fills': []}) as trade:
-            with patch.object(TradingReport, 'build', return_value=('title', 'content')):
+            with patch.object(TradeExecutionReport, 'build', return_value=('title', 'content')):
                 with patch.object(notifier.repository, 'enqueue', side_effect=OSError('disk full')) as enqueue:
                     task.start()
                     task.thread.join(timeout=3)
@@ -143,7 +143,7 @@ class PushPlusTests(unittest.TestCase):
         task.output['fills'] = [{'side': 'buy', 'symbol': '510300.XSHG', 'quantity': 100,
                                  'price': '3.500', 'commission': '5.00'}]
         task.output['positions'] = {'510300.XSHG': {'quantity': 100}}
-        _, content = TradingReport.build(task)
+        _, content = TradeExecutionReport.build(task)
         self.assertIn('买入 510300.XSHG × 100 份', content)
         self.assertIn('手续费 5.00 元', content)
         self.assertNotIn('今日无调仓', content)
