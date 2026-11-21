@@ -1,15 +1,15 @@
-"""行情适配：BaoStock 日线、新浪当前报价、上海市场交易日历。"""
+"""AKShare适配：东财前复权日线、批量当前报价、上海市场交易日历。"""
 import akshare as ak
 import logging
 import math
 import pandas as pd
 import re
+import requests
 import time as clock
 from akshare.utils.context import config as ak_config
 from datetime import datetime, time, timedelta
 from decimal import Decimal
 from market_trading_bot.market.MarketData import DailyClose, MarketData
-from market_trading_bot.market.MarketSource import MarketSource
 from zoneinfo import ZoneInfo
 
 SHANGHAI = ZoneInfo('Asia/Shanghai')
@@ -37,12 +37,11 @@ class AKShareMarket:
         if not math.isfinite(self.timeout) or min(self.max_quote_age, self.lookback_days, self.timeout) <= 0:
             raise ValueError('行情超时、时效和回溯天数必须为正数')
         ak_config.timeout = self.timeout
-        self.source = MarketSource(self.timeout, self.logger)
 
     def load(self, symbols: tuple[str, ...], history_points: int) -> tuple[datetime, dict[str, MarketData]]:
         """加载连续历史收盘价及当日报价，校验交易时段、日期和价格。"""
         started_at = datetime.now(SHANGHAI)
-        self.logger.info('行情获取开始 daily=baostock,tencent quotes=sina,tencent symbols=%s', ','.join(symbols))
+        self.logger.info('行情获取开始 provider=akshare_eastmoney symbols=%s', ','.join(symbols))
         try:
             calendar = self.trading_calendar()
             if not calendar or not calendar[0] <= started_at.date() <= calendar[-1]:
@@ -54,8 +53,8 @@ class AKShareMarket:
                 match = re.fullmatch(r'(\d{6})\.(XSHG|XSHE)', symbol)
                 if not match:
                     raise MarketDataError(f'不支持的证券代码: {symbol}')
-                market_id = 'sh' if match.group(2) == 'XSHG' else 'sz'
-                secids[f'{market_id}{match.group(1)}'] = symbol
+                market_id = '1' if match.group(2) == 'XSHG' else '0'
+                secids[f'{market_id}.{match.group(1)}'] = symbol
             self.logger.info('交易日历获取成功 date=%s coverage=%s~%s', started_at.date(), calendar[0], calendar[-1])
             trading_days = [day for day in calendar if day < started_at.date()][-history_points:]
             if len(trading_days) != history_points:
@@ -94,8 +93,8 @@ class AKShareMarket:
         for symbol in sorted(symbols):
             if not re.fullmatch(r'\d{6}\.(XSHG|XSHE)', symbol):
                 raise MarketDataError(f'不支持的证券代码: {symbol}')
-            daily = self._request(self._daily, symbol=symbol, start_date=day.strftime('%Y%m%d'),
-                                  end_date=day.strftime('%Y%m%d'), adjust='', required_days=[day])
+            daily = self._request(ak.fund_etf_hist_em, symbol=symbol.split('.')[0], period='daily',
+                                  start_date=day.strftime('%Y%m%d'), end_date=day.strftime('%Y%m%d'), adjust='')
             if daily.empty:
                 raise MarketDataError(f'{symbol}: {day} 收盘价尚未更新')
             dates = pd.to_datetime(daily['日期'], errors='raise').dt.date
@@ -113,10 +112,23 @@ class AKShareMarket:
 
     def _load_quotes(self, secids: dict[str, str]) -> dict[str, tuple[float, datetime]]:
         """批量获取未复权价格和报价时间，每个标的须恰好返回一条。"""
-        try:
-            return self.source.quotes(list(secids.values()), lambda: datetime.now(SHANGHAI), self.max_quote_age)
-        except Exception as exc:
-            raise MarketDataError(f'当前报价获取失败: {exc}') from exc
+        response = self._request(
+            requests.get, url='https://push2.eastmoney.com/api/qt/ulist.np/get',
+            params={'secids': ','.join(secids), 'fields': 'f2,f12,f13,f124', 'fltt': '2'},
+            timeout=self.timeout)
+        response.raise_for_status()
+        payload = response.json()
+        if payload.get('rc') != 0 or not payload.get('data'):
+            raise MarketDataError('当前报价接口返回错误或空数据')
+        quotes = {}
+        for item in payload['data']['diff']:
+            key = f"{item['f13']}.{item['f12']}"
+            if key not in secids or key in quotes:
+                raise MarketDataError('当前报价包含错误或重复证券代码')
+            quotes[key] = (float(item['f2']), datetime.fromtimestamp(int(item['f124']), SHANGHAI))
+        if set(quotes) != set(secids):
+            raise MarketDataError('当前报价缺少标的')
+        return {secids[key]: value for key, value in quotes.items()}
 
     @staticmethod
     def _is_trading_session(as_of: datetime):
@@ -134,8 +146,8 @@ class AKShareMarket:
         end_date = (before_day - timedelta(days=1)).strftime('%Y%m%d')
         histories = {}
         for symbol in symbols:
-            daily = self._request(self._daily,
-                symbol=symbol, start_date=start_date, end_date=end_date, adjust='qfq', required_days=trading_days)
+            daily = self._request(ak.fund_etf_hist_em,
+                symbol=symbol.split('.')[0], period='daily', start_date=start_date, end_date=end_date, adjust='qfq')
             self.logger.info('历史日线获取结果 symbol=%s rows=%d window_days=%d', symbol, len(daily), self.lookback_days)
             if daily.empty:
                 raise MarketDataError(f'{symbol}: 无历史行情')
@@ -174,15 +186,6 @@ class AKShareMarket:
         snapshots = {symbol: MarketData(symbol, quoted_at, float(prices[symbol]), histories[symbol])
                      for symbol in symbols}
         return finished_at, snapshots
-
-    def _daily(self, symbol, start_date, end_date, adjust, required_days=None):
-        """通过受超时约束的独立进程查询日线，隔离 BaoStock 的全局连接。"""
-        start = datetime.strptime(start_date, '%Y%m%d').date().isoformat()
-        end = datetime.strptime(end_date, '%Y%m%d').date().isoformat()
-        try:
-            return self.source.daily(symbol, start, end, adjust, required_days)
-        except Exception as exc:
-            raise MarketDataError(f'{symbol}: 日线请求失败: {exc}') from exc
 
     def _request(self, function, **kwargs):
         """按配置限制请求间隔。"""

@@ -31,20 +31,12 @@ class MarketFixture:
 
     def load(self, symbols=None):
         response = Mock()
-        lines = []
-        for quote in self.quotes:
-            fields = ['0'] * 32
-            fields[3] = str(quote['f2'])
-            quoted_at = datetime.fromtimestamp(quote['f124'], ZoneInfo('Asia/Shanghai'))
-            fields[30], fields[31] = quoted_at.strftime('%Y-%m-%d'), quoted_at.strftime('%H:%M:%S')
-            prefix = 'sh' if quote['f13'] == 1 else 'sz'
-            lines.append(f'var hq_str_{prefix}{quote["f12"]}="{",".join(fields)}";')
-        response.text = '\n'.join(lines)
+        response.json.return_value = {'rc': 0, 'data': {'diff': self.quotes}}
         with patch.object(MARKET_MODULE, 'datetime', wraps=datetime) as clock, \
                 patch.object(MARKET_MODULE.ak, 'calendar_trade_date_hist_sina', return_value=pd.DataFrame(
                     {'trade_date': [day.date() for day in self.days] + [NOW.date()]})), \
-                patch.object(AKShareMarket, '_daily', return_value=self.daily), \
-                patch('market_trading_bot.market.HttpMarket.requests.get', return_value=response) as request:
+                patch.object(MARKET_MODULE.ak, 'fund_etf_hist_em', return_value=self.daily), \
+                patch.object(MARKET_MODULE.requests, 'get', return_value=response) as request:
             clock.now.return_value = NOW
             result = AKShareMarket(self.settings).load(
                 self.strategy.symbols if symbols is None else symbols, self.strategy.history_points)
