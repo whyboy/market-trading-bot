@@ -12,6 +12,7 @@ class PushPlusNotifier:
         self.client = PushPlusClient(token)
 
     def send_trade_execution_report(self, task):
+        """策略执行结束后发送报告，无成交也发送；推送失败仅记录日志，不影响交易结果。"""
         try:
             title, content = TradeExecutionReport.build(task)
             self.client.send(title, content)
