@@ -2,6 +2,8 @@
 import json
 import sqlite3
 import tempfile
+import threading
+import time
 import unittest
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
@@ -98,9 +100,66 @@ class MonitorTests(unittest.TestCase):
     def test_dead_worker_is_offline_even_with_fresh_heartbeat(self):
         with TestClient(web.app) as client:
             worker = web.app.state.worker
-            worker.stop_event.set()
-            worker.thread.join(timeout=2)
+            worker.stop()
             now = datetime.now(timezone.utc).isoformat()
             worker.store.write({**worker.status, 'state': 'idle', 'heartbeat_at': now})
             self.assertFalse(client.get('/api/runtime').json()['online'])
             self.assertEqual(client.get('/api/strategies').status_code, 200)
+
+    def test_trade_and_heartbeat_share_thread_with_separate_timeout(self):
+        entered = threading.Event()
+        release = threading.Event()
+        thread_ids = []
+
+        def trade(*args):
+            thread_ids.append(threading.get_ident())
+            entered.set()
+            if not release.wait(3):
+                raise TimeoutError('测试未释放交易')
+
+        with patch('market_trading_bot.runner.run_pap', side_effect=trade):
+            with TestClient(web.app) as client:
+                worker = web.app.state.worker
+                worker.submit_trade(self.root / 'config/example_strategy.json', 'example_pap')
+                try:
+                    self.assertTrue(entered.wait(2))
+                    stored = worker.store.read()
+                    self.assertEqual(stored['state'], 'running')
+                    self.assertEqual(thread_ids, [worker.thread.ident])
+                    # 模拟执行已过 30 秒：待命阈值已过，但未到交易阈值。
+                    old = (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat()
+                    stored['heartbeat_at'] = old
+                    stored['current_execution']['started_at'] = old
+                    worker.store.write(stored)
+                    self.assertTrue(client.get('/api/runtime').json()['online'])
+                    self.assertEqual(worker.store.read()['heartbeat_at'], old)
+                    stored['trade_timeout_seconds'] = 10
+                    worker.store.write(stored)
+                    result = client.get('/api/runtime').json()
+                    self.assertFalse(result['online'])
+                    self.assertEqual(result['health'], 'trade_timeout')
+                    self.assertEqual(client.get('/api/strategies').status_code, 200)
+                finally:
+                    release.set()
+                deadline = time.monotonic() + 2
+                while time.monotonic() < deadline and not worker.store.read()['last_execution']:
+                    time.sleep(.01)
+                result = client.get('/api/runtime').json()
+                self.assertTrue(result['last_execution']['success'])
+                self.assertEqual(result['state'], 'idle')
+                self.assertTrue(result['online'])
+
+    def test_failed_trade_records_error_and_worker_remains_available(self):
+        with patch('market_trading_bot.runner.run_pap', side_effect=ValueError('行情无效')):
+            with TestClient(web.app) as client:
+                worker = web.app.state.worker
+                worker.submit_trade(self.root / 'config/example_strategy.json', 'example_pap')
+                deadline = time.monotonic() + 2
+                while time.monotonic() < deadline and not worker.store.read()['last_execution']:
+                    time.sleep(.01)
+                result = client.get('/api/runtime').json()
+                self.assertFalse(result['last_execution']['success'])
+                self.assertEqual(result['last_execution']['error'], '行情无效')
+                self.assertTrue(result['last_execution']['finished_at'])
+                self.assertEqual(result['state'], 'idle')
+                self.assertTrue(result['online'])

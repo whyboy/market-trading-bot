@@ -152,7 +152,9 @@ npm ci --prefix frontend
 npm run dev --prefix frontend -- --port 8000 --strictPort
 ```
 
-前端将 `/api` 请求代理到后端 `8001`。后台交易线程每 5 秒上报心跳，随服务启动和退出。
+前端将 `/api` 请求代理到后端 `8001`。后台线程待命时每 5 秒更新心跳，执行交易时暂停心跳，完成后记录结果并恢复心跳；线程随服务启停。
+待命超过 20 秒未更新心跳判定失联；交易执行超时由 `runtime.trade_timeout_seconds` 配置，默认 300 秒。
+超时只标记异常，不会强制中断或重试交易。
 后端仅启动一个实例（不要增加 `--workers`）；启动和重启不会自动调仓，手动调仓沿用 `main.py --pap etf_rotation_pap`。
 
 部署时执行 `npm run build --prefix frontend`，只需启动一个后端服务，
@@ -170,4 +172,4 @@ npm run dev --prefix frontend -- --port 8000 --strictPort
 | `/api/strategies/{strategy_id}/logs` | 日志日期列表，按日期倒序 |
 | `/api/strategies/{strategy_id}/logs/{date}?offset=0` | 指定日期日志，返回内容及下一页偏移量 |
 
-日志日期格式为 `YYYY-MM-DD`；日志按策略归档。手动调仓结果通过账户与日志查看。
+日志日期格式为 `YYYY-MM-DD`；日志按策略归档。手动调仓结果通过账户与日志查看。后台线程提供内部 `submit_trade()` 入口，供后续调度接入，页面仍为只读。

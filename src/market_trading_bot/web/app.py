@@ -2,6 +2,7 @@
 import json
 import re
 import sqlite3
+from asyncio import to_thread
 from contextlib import asynccontextmanager, closing
 from datetime import date, datetime, timezone
 from fastapi import FastAPI, HTTPException, Query
@@ -22,7 +23,7 @@ async def lifespan(application: FastAPI):
     try:
         yield
     finally:
-        worker.stop()
+        await to_thread(worker.stop)
         application.state.worker = None
 
 
@@ -52,10 +53,18 @@ def runtime():
     now = datetime.now(timezone.utc)
     age = max(0, (now - datetime.fromisoformat(status['heartbeat_at'])).total_seconds())
     worker = getattr(app.state, 'worker', None)
-    online = age <= 20 and status['state'] != 'stopped'
+    execution = status.get('current_execution')
+    running = status['state'] == 'running' and execution is not None
+    execution_age = max(0, (now - datetime.fromisoformat(execution['started_at'])).total_seconds()) if running else None
+    timed_out = running and execution_age > status.get('trade_timeout_seconds', 300)
+    online = (not timed_out if running else age <= 20) and status['state'] != 'stopped'
+    health = 'trade_timeout' if timed_out else 'heartbeat_timeout' if not online and status['state'] != 'stopped' else status['state']
     if worker is not None:
-        online = online and worker.thread.is_alive()
-    return {**status, 'online': online, 'heartbeat_age_seconds': age,
+        if not worker.thread.is_alive():
+            online = False
+            health = 'stopped'
+    return {**status, 'online': online, 'health': health, 'execution_age_seconds': execution_age,
+            'heartbeat_age_seconds': age,
             'uptime_seconds': max(0, (now - datetime.fromisoformat(status['started_at'])).total_seconds()) if online else None}
 
 

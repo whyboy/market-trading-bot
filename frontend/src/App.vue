@@ -2,14 +2,14 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 type Instance = { id: string; mode: string; enabled: boolean }
 type Strategy = { id: string; instances: Instance[] }
-type Runtime = { online: boolean; state: string; started_at?: string; heartbeat_at?: string; uptime_seconds?: number; last_execution?: { success: boolean; error?: string; finished_at: string } }
+type Runtime = { online: boolean; state: string; health?: string; started_at?: string; heartbeat_at?: string; uptime_seconds?: number; last_execution?: { success: boolean; error?: string; finished_at: string } }
 type Account = { initialized: boolean; as_of?: string; date?: string; cash?: string; equity?: string; initial_cash?: string; positions?: Record<string, { quantity: number }> }
 const runtime = ref<Runtime | null>(null), runtimeError = ref(''), error = ref('')
 const strategies = ref<Strategy[]>([]), strategy = ref(''), instance = ref('')
 const account = ref<Account | null>(null), dates = ref<string[]>([]), selectedDate = ref('')
 const log = ref(''), offset = ref(0), hasMore = ref(false), loadingLog = ref(false)
 const accounts = computed(() => strategies.value.find(s => s.id === strategy.value)?.instances ?? [])
-const label = computed(() => !runtime.value ? '状态未知' : !runtime.value.online ? (runtime.value.state === 'unknown' ? '尚无心跳' : runtime.value.state === 'stopped' ? '已停止' : '心跳中断') : runtime.value.state === 'running' ? '执行中' : '正常待命')
+const label = computed(() => !runtime.value ? '状态未知' : runtime.value.health === 'trade_timeout' ? '交易执行超时' : !runtime.value.online ? (runtime.value.state === 'unknown' ? '尚无心跳' : runtime.value.state === 'stopped' ? '已停止' : '心跳中断') : runtime.value.state === 'running' ? '执行中' : '正常待命')
 const money = (value: unknown) => value == null ? '—' : Number(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const time = (value?: string) => value ? new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '—'
 const uptime = computed(() => runtime.value?.uptime_seconds == null ? '—' : `${Math.floor(runtime.value.uptime_seconds / 3600)} 小时 ${Math.floor(runtime.value.uptime_seconds / 60) % 60} 分钟 ${Math.floor(runtime.value.uptime_seconds) % 60} 秒`)
