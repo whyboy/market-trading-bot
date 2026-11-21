@@ -128,6 +128,55 @@ class TaskScheduler:
         finally:
             self.calendar_lock.release()
 
+    def _load_calendar(self, day, market):
+        """读取交易日历，返回当天是否交易及上一交易日。"""
+        calendar = market.trading_calendar()
+        if not calendar or not calendar[0] < day <= calendar[-1]:
+            raise ValueError('交易日历未覆盖当前日期及上一交易日')
+        self.calendar_error = None
+        return {'day': day, 'is_trading_day': day in calendar,
+                'previous_trading_day': max(value for value in calendar if value < day)}
+
+    def _start_trades(self, strategy_id, day=None):
+        """为启用账户启动独立交易任务，跳过仍在运行的账户。"""
+        today = self.now().date()
+        if self.stop_event.is_set() or (day is not None and day != today) or self._trading_day_context(today) is None:
+            return
+        with self.tasks_lock:
+            if self.stop_event.is_set() or self.now().date() != today:
+                return
+            config = self.configs[strategy_id]
+            scheduled_at = datetime.combine(today, time.fromisoformat(config['schedule']['trade_time']), SHANGHAI)
+            for instance in config.get('instances', []):
+                if not instance['enabled']:
+                    continue
+                key = (strategy_id, instance['id'])
+                previous = self.tasks.get(key)
+                if previous is not None and previous.thread.is_alive():
+                    continue
+                try:
+                    task = self._build_trade_task(strategy_id, instance, scheduled_at)
+                    task.start()
+                    self.tasks[key] = task
+                except Exception:
+                    logging.getLogger(__name__).exception('创建任务失败 strategy=%s instance=%s', strategy_id, instance['id'])
+
+    def _build_trade_task(self, strategy_id, instance, scheduled_at):
+        """为一个策略账户装配独立的交易依赖。"""
+        config = self.configs[strategy_id]
+        if instance['mode'] != 'pap' or config['strategy'] != 'etf_rotation':
+            raise ValueError('当前仅支持ETF轮动模拟账户')
+        data_dir = self.root / self.settings['storage']['data_dir']
+        return TradingTask(
+            strategy=ETFRotationStrategyImpl(config['parameters']),
+            market=AKShareMarket(self.settings['market']),
+            executor=TradeExecutor(instance['execution'], config['instruments']),
+            account_store=AccountService(data_dir, instance['id'], strategy_id),
+            strategy_id=strategy_id, instance_id=instance['id'], initial_cash=instance['initial_cash'],
+            scheduled_at=scheduled_at, notifier=self.notifier,
+            trade_timeout_seconds=self.settings.get('runtime', {}).get('trade_timeout_seconds', 300),
+            log_context=strategy_logging(self.root, strategy_id, self.settings['logging']))
+
     def _recover_daily_tasks(self, scheduled_day=None):
         """晚启动先补估值；已过15:10时等待补估值结束再发送当天日报。"""
         if scheduled_day is not None and scheduled_day != self.now().date():
@@ -195,60 +244,15 @@ class TaskScheduler:
             return None
         return context
 
-    def _load_calendar(self, day, market):
-        """读取交易日历，返回当天是否交易及上一交易日。"""
-        calendar = market.trading_calendar()
-        if not calendar or not calendar[0] < day <= calendar[-1]:
-            raise ValueError('交易日历未覆盖当前日期及上一交易日')
-        self.calendar_error = None
-        return {'day': day, 'is_trading_day': day in calendar,
-                'previous_trading_day': max(value for value in calendar if value < day)}
-
     def _is_trading(self, strategy_id, instance_id):
         """判断指定策略账户的交易线程是否仍在运行。"""
         with self.tasks_lock:
             task = self.tasks.get((strategy_id, instance_id))
         return task is not None and task.thread.is_alive()
 
-    def _start_trades(self, strategy_id, day=None):
-        """为启用账户启动独立交易任务，跳过仍在运行的账户。"""
-        today = self.now().date()
-        if self.stop_event.is_set() or (day is not None and day != today) or self._trading_day_context(today) is None:
-            return
-        with self.tasks_lock:
-            if self.stop_event.is_set() or self.now().date() != today:
-                return
-            config = self.configs[strategy_id]
-            scheduled_at = datetime.combine(today, time.fromisoformat(config['schedule']['trade_time']), SHANGHAI)
-            for instance in config.get('instances', []):
-                if not instance['enabled']:
-                    continue
-                key = (strategy_id, instance['id'])
-                previous = self.tasks.get(key)
-                if previous is not None and previous.thread.is_alive():
-                    continue
-                try:
-                    task = self._build_trade_task(strategy_id, instance, scheduled_at)
-                    task.start()
-                    self.tasks[key] = task
-                except Exception:
-                    logging.getLogger(__name__).exception('创建任务失败 strategy=%s instance=%s', strategy_id, instance['id'])
-
-    def _build_trade_task(self, strategy_id, instance, scheduled_at):
-        """为一个策略账户装配独立的交易依赖。"""
-        config = self.configs[strategy_id]
-        if instance['mode'] != 'pap' or config['strategy'] != 'etf_rotation':
-            raise ValueError('当前仅支持ETF轮动模拟账户')
-        data_dir = self.root / self.settings['storage']['data_dir']
-        return TradingTask(
-            strategy=ETFRotationStrategyImpl(config['parameters']),
-            market=AKShareMarket(self.settings['market']),
-            executor=TradeExecutor(instance['execution'], config['instruments']),
-            account_store=AccountService(data_dir, instance['id'], strategy_id),
-            strategy_id=strategy_id, instance_id=instance['id'], initial_cash=instance['initial_cash'],
-            scheduled_at=scheduled_at, notifier=self.notifier,
-            trade_timeout_seconds=self.settings.get('runtime', {}).get('trade_timeout_seconds', 300),
-            log_context=strategy_logging(self.root, strategy_id, self.settings['logging']))
+    def _heartbeat(self):
+        """更新调度服务心跳。"""
+        self.heartbeat_at = datetime.now(timezone.utc).isoformat()
 
     def stop(self):
         """通知任务退出，等待执行结束后释放部署锁。"""
@@ -304,7 +308,3 @@ class TaskScheduler:
                                      'last_execution': task_map[(strategy_id, instance['id'])].result
                                      if (strategy_id, instance['id']) in task_map else None}
                                     for instance in config.get('instances', []) if instance['enabled']]}
-
-    def _heartbeat(self):
-        """更新调度服务心跳。"""
-        self.heartbeat_at = datetime.now(timezone.utc).isoformat()
