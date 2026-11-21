@@ -11,24 +11,17 @@ from market_trading_bot.market.AKShareMarket import SHANGHAI
 
 
 class TradingTask:
-    """协调已注入的依赖，不读取配置或构建策略、行情、执行器及Repository。"""
+    """协调策略、行情、模拟交易和记账。"""
 
-    def __init__(self, strategy, market, executor, account_repository, status_repository, *,
+    def __init__(self, strategy, market, executor, account_store, status_store, *,
                  strategy_id, instance_id, initial_cash, scheduled_at, notifier, trade_timeout_seconds=300,
                  log_context=None):
-        """注入策略、行情、交易及存储依赖，创建尚未启动的交易线程。
-
-        :param scheduled_at: 计划执行时间，决定本次交易的记账日期。
-        :param initial_cash: 首次开户资金，已有账户使用账本资金。
-        :param notifier: 策略执行结束后发送报告的通知对象。
-        :param trade_timeout_seconds: 监控超时阈值，不会强制中断交易。
-        :param log_context: 交易日志上下文，省略时使用默认日志。
-        """
+        """创建交易线程；scheduled_at 决定记账日期，超时仅用于监控。"""
         self.strategy = strategy
         self.market = market
         self.executor = executor
-        self.account_repository = account_repository
-        self.status_repository = status_repository
+        self.account_store = account_store
+        self.status_store = status_store
         self.strategy_id = strategy_id
         self.instance_id = instance_id
         self.initial_cash = initial_cash
@@ -68,7 +61,7 @@ class TradingTask:
                     if self.stop_event.is_set():
                         execution.update(success=False, error='任务已停止')
                     else:
-                        self.output = self.run_pap()
+                        self.output = self.trade()
                         execution['success'] = True
                         logger.info('任务完成 strategy=%s instance=%s', self.strategy_id, self.instance_id)
                 except Exception as exc:
@@ -83,11 +76,11 @@ class TradingTask:
             try:
                 self._heartbeat()
             finally:
-                self.notifier.send_trade_execution_report(self)
+                self.notifier.send_trade_report(self)
 
-    def run_pap(self) -> dict:
+    def trade(self) -> dict:
         """已有当日账本则直接返回，否则获取行情、计算信号并原子调仓。"""
-        committed = self.account_repository.find_execution_by_date(self.scheduled_at.date().isoformat())
+        committed = self.account_store.get_execution(self.scheduled_at.date().isoformat())
         if committed is None:
             self.logger.info('获取行情 instance=%s', self.instance_id)
             as_of, snapshots = self.market.load(self.strategy.symbols, self.strategy.history_points)
@@ -101,7 +94,7 @@ class TradingTask:
             committed = self._rebalance(signal)
         output = {'operation': 'pap_rebalance', 'instance_id': self.instance_id, **committed}
         try:
-            self.account_repository.export_trade_summary_csv()
+            self.account_store.export_trades()
             output['csv_exported'] = True
         except (OSError, sqlite3.Error):
             self.logger.exception('CSV导出失败；账本已提交，可重新导出')
@@ -109,26 +102,20 @@ class TradingTask:
         return output
 
     def _rebalance(self, signal):
-        # 读取账户、防重复、模拟计算及保存共享同一事务，计算失败回滚全部修改。
-        """在同一事务中读取账户、模拟调仓并保存，已记账则复用结果。
-
-        :param signal: 含日期、目标仓位和排名的策略信号。
-        :return: 已提交的交易结果。
-        :raises Exception: 计算或保存失败，事务回滚。
-        """
-        with self.account_repository.begin_rebalance_transaction(signal.as_of.date().isoformat(), self.initial_cash) as transaction:
+        """在同一事务中读取账户、模拟调仓并保存，已记账则复用结果。"""
+        with self.account_store.transaction(signal.as_of.date().isoformat(), self.initial_cash) as transaction:
             if transaction.completed is not None:
                 result = transaction.completed
             else:
                 result = self.executor.rebalance(signal, transaction.account)
                 result['signal'] = asdict(signal)
-                result = transaction.save_execution_result(result)
+                result = transaction.save_execution(result)
         return result
 
     def _heartbeat(self):
-        """更新任务心跳并写入运行状态仓库。"""
+        """更新并保存交易任务心跳。"""
         self.status['heartbeat_at'] = self.now().isoformat()
-        self.status_repository.write(self.status)
+        self.status_store.write(self.status)
 
     @staticmethod
     def now():

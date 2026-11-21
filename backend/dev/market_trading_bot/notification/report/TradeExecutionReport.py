@@ -22,11 +22,7 @@ class TradeExecutionReport:
 
     @staticmethod
     def build(task):
-        """生成策略执行结果消息，无成交也生成；失败时仅显示失败提示。
-
-        :param task: 已完成的交易任务，包含执行结果及账户仓库。
-        :return: (标题, 纯文本正文)，收益采用执行时估值。
-        """
+        """返回执行报告标题和正文；失败时仅显示提示，收益采用执行时估值。"""
         result = task.result
         title = f"{task.strategy_id}｜模拟交易{'完成' if result['success'] else '失败'}"
         lines = [f'账户：{task.instance_id}', f'计划时间：{task.scheduled_at.isoformat()}',
@@ -39,12 +35,11 @@ class TradeExecutionReport:
         lines.extend([f"估值时间：{output['signal']['as_of']}",
                       f"总资产：{Decimal(output['equity']):,.2f} 元",
                       f"可用现金：{Decimal(output['cash']):,.2f} 元"])
-        account = task.account_repository.get_latest_account(task.account_repository.directory.parent, task.instance_id)
-        if account.get('initial_cash'):
-            initial = Decimal(account['initial_cash'])
-            equity = Decimal(output['equity'])
-            lines.extend([f'累计盈亏：{equity - initial:+,.2f} 元',
-                          f'累计收益率：{(equity / initial - 1) * 100:+.2f}%'])
+        account = task.account_store.get_latest_account(task.account_store.directory.parent, task.instance_id)
+        initial_cash = Decimal(account['initial_cash'])
+        equity = Decimal(output['equity'])
+        lines.extend([f'累计盈亏：{equity - initial_cash:+,.2f} 元',
+                      f'累计收益率：{(equity / initial_cash - 1) * 100:+.2f}%'])
         if output['fills']:
             lines.append('成交：')
             for fill in output['fills']:

@@ -32,9 +32,9 @@ class PapAccountDailyResultsTests(unittest.TestCase):
         readonly = PapAccountRepository.get_latest_account(self.root, 'pap')
         self.assertEqual(readonly['initial_cash'], '100000')
         repository = PapAccountRepository(self.root, 'pap', 'rotation')
-        self.assertEqual(repository.find_execution_by_date('2026-11-20'), self.execution)
+        self.assertEqual(repository.get_execution('2026-11-20'), self.execution)
         reopened = PapAccountRepository(self.root, 'pap', 'rotation')
-        self.assertEqual(reopened.find_execution_by_date('2026-11-20'), self.execution)
+        self.assertEqual(reopened.get_execution('2026-11-20'), self.execution)
         with sqlite3.connect(database) as connection:
             tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             self.assertEqual(connection.execute('SELECT initial_cash FROM account').fetchone()[0], '100000')
@@ -53,11 +53,11 @@ class PapAccountDailyResultsTests(unittest.TestCase):
 
     def test_valuation_only_row_does_not_prevent_actual_execution(self):
         repository = PapAccountRepository(self.root, 'pap', 'rotation')
-        repository.save_daily_valuation({'date': '2026-11-20', 'equity': '100500'})
-        self.assertIsNone(repository.find_execution_by_date('2026-11-20'))
-        with repository.begin_rebalance_transaction('2026-11-20', 100000) as transaction:
+        repository.save_valuation({'date': '2026-11-20', 'equity': '100500'})
+        self.assertIsNone(repository.get_execution('2026-11-20'))
+        with repository.transaction('2026-11-20', 100000) as transaction:
             self.assertIsNone(transaction.completed)
-            transaction.save_execution_result(self.execution)
+            transaction.save_execution(self.execution)
         result = repository.get_daily_result(self.root, 'pap', '2026-11-20')
         self.assertEqual(result['execution'], self.execution)
         self.assertEqual(result['valuation_status'], 'pending')
@@ -65,10 +65,10 @@ class PapAccountDailyResultsTests(unittest.TestCase):
 
     def test_valuation_updates_keep_execution_and_do_not_create_extra_rows(self):
         repository = PapAccountRepository(self.root, 'pap', 'rotation')
-        with repository.begin_rebalance_transaction('2026-11-20', 100000) as transaction:
-            transaction.save_execution_result(self.execution)
-        repository.save_daily_valuation({'date': '2026-11-20', 'equity': '100500'})
-        repository.save_daily_valuation({'date': '2026-11-20', 'equity': '100800'})
+        with repository.transaction('2026-11-20', 100000) as transaction:
+            transaction.save_execution(self.execution)
+        repository.save_valuation({'date': '2026-11-20', 'equity': '100500'})
+        repository.save_valuation({'date': '2026-11-20', 'equity': '100800'})
         result = repository.get_daily_result(self.root, 'pap', '2026-11-20')
         self.assertEqual(result['execution'], self.execution)
         self.assertEqual(result['valuation']['equity'], '100800')
@@ -77,8 +77,8 @@ class PapAccountDailyResultsTests(unittest.TestCase):
 
     def test_duplicate_execution_cannot_overwrite_committed_trade(self):
         repository = PapAccountRepository(self.root, 'pap', 'rotation')
-        with repository.begin_rebalance_transaction('2026-11-20', 100000) as transaction:
-            transaction.save_execution_result(self.execution)
+        with repository.transaction('2026-11-20', 100000) as transaction:
+            transaction.save_execution(self.execution)
             with self.assertRaises(ValueError):
-                transaction.save_execution_result({**self.execution, 'cash': '0'})
-        self.assertEqual(repository.find_execution_by_date('2026-11-20')['cash'], '100000')
+                transaction.save_execution({**self.execution, 'cash': '0'})
+        self.assertEqual(repository.get_execution('2026-11-20')['cash'], '100000')

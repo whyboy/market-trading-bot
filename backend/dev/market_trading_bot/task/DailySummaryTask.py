@@ -6,16 +6,7 @@ from market_trading_bot.repository.PapAccountRepository import PapAccountReposit
 
 class DailySummaryTask:
     def __init__(self, root, settings, configs, notifier, context, stop_event, now):
-        """创建日报任务，汇总范围为配置中启用的模拟账户。
-
-        :param root: backend/dev 目录。
-        :param settings: 含 storage.data_dir 的全局配置。
-        :param configs: 按策略 ID 索引的策略及账户配置。
-        :param notifier: 发送汇总日报的通知对象。
-        :param context: 日期、是否交易日及上一交易日，失败时包含 notice。
-        :param stop_event: 与调度器共享的停止信号。
-        :param now: 返回当前北京时间的函数。
-        """
+        """创建日报线程；context 为当天日历，stop_event 与调度器共享。"""
         self.directory = root / settings['storage']['data_dir']
         self.configs = configs
         self.notifier = notifier
@@ -27,26 +18,23 @@ class DailySummaryTask:
         self.logger = logging.getLogger(__name__)
 
     def start(self):
-        """由调度器在15:10启动汇总线程；不获取行情、不修改账户数据库。"""
+        """启动日报线程。"""
         self.thread.start()
 
     def stop(self):
-        """发出共享停止信号，并等待日报线程退出。"""
+        """设置共享停止信号并等待线程退出。"""
         self.stop_event.set()
         self.thread.join()
 
     def _run(self):
-        """执行日报汇总，记录完成状态；未处理的异常写入日志。"""
+        """执行汇总并记录完成状态。"""
         try:
             self.completed = self.run()
         except Exception:
             self.logger.exception('每日汇总任务失败')
 
     def run(self):
-        """读取所有启用模拟账户的结果，合并为一份日报交给通知器发送。
-
-        :return: 已调用通知器返回 True；停止或跨日返回 False，不保证消息送达。
-        """
+        """读取启用模拟账户并发送一份日报；停止或跨日返回 False。"""
         day = self.context['day']
         summaries = []
         for strategy_id, config in sorted(self.configs.items()):
@@ -63,23 +51,19 @@ class DailySummaryTask:
                 summaries.append({'strategy_id': strategy_id, 'instance_id': instance['id'], 'summary': summary})
         if self.stop_event.is_set() or self.now().date() != day:
             return False
-        self.notifier.send_daily_summary_report(day, summaries)
+        self.notifier.send_daily_report(day, summaries)
         return True
 
     def _read_summary(self, instance_id):
-        """读取账户日报数据；休市日取最近成功估值，未完成或失败时返回提示。
-
-        :param instance_id: 账户 ID。
-        :return: 估值字典，或仅包含 notice 的提示字典；不请求行情、不写数据库。
-        """
+        """读取估值或失败提示；休市日使用最近成功估值。"""
         day = self.context['day']
         if self.context.get('notice'):
             return {'notice': self.context['notice']}
-        account = PapAccountRepository.get_account_snapshot_on_or_before(self.directory, instance_id, day.isoformat())
+        account = PapAccountRepository.get_snapshot(self.directory, instance_id, day.isoformat())
         if not account['initialized']:
             return {'notice': '账户尚未开户，暂无持仓和收益数据。'}
         if not self.context['is_trading_day']:
-            snapshot = PapAccountRepository.find_latest_valuation_on_or_before(self.directory, instance_id, day.isoformat())
+            snapshot = PapAccountRepository.get_valuation(self.directory, instance_id, day.isoformat())
             if snapshot is None:
                 return {'notice': '今日休市，暂无有效收盘估值。'}
             return {**snapshot, 'is_trading_day': False}

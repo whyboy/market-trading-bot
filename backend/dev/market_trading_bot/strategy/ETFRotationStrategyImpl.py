@@ -10,14 +10,11 @@ class ETFRotationStrategyImpl:
     """按加权动量选取一只 ETF，再按目标年化波动率计算仓位。"""
 
     def __init__(self, parameters: dict):
-        """读取 ETF 池、价格窗口和年化参数；配置无效时抛出 ValueError。
-
-        :param parameters: 策略参数字典；当前仅支持 select_num=1。
-        """
+        """读取并校验 ETF 池、计算窗口和年化参数；仅支持选一只 ETF。"""
         self.symbols = tuple(parameters['etf_pool'])
         self.momentum_points = parameters['momentum_price_points']
         self.volatility_points = parameters['volatility_price_points']
-        self.target_vol = float(parameters['target_annual_volatility'])
+        self.target_volatility = float(parameters['target_annual_volatility'])
         self.annual_days = parameters['annualization_days']
         if not self.symbols or len(set(self.symbols)) != len(self.symbols):
             raise ValueError('ETF池不能为空或包含重复标的')
@@ -27,7 +24,7 @@ class ETFRotationStrategyImpl:
             (self.momentum_points, 3), (self.volatility_points, 3), (self.annual_days, 1)
         )):
             raise ValueError('窗口必须为至少3点的整数，年化天数必须为正整数')
-        if not math.isfinite(self.target_vol) or self.target_vol < 0:
+        if not math.isfinite(self.target_volatility) or self.target_volatility < 0:
             raise ValueError('目标波动率必须为非负有限数')
 
     @property
@@ -40,25 +37,18 @@ class ETFRotationStrategyImpl:
 
         得分为年化回归收益乘 R²；全部为负仍选最高分，同分按 ETF 池顺序。
         仓位上限为 100%，年化波动率低于 1e-6 时满仓，其余标的权重为零。
-
-        :param snapshots: 经行情层校验的快照，价格有效、历史连续且报价未过期。
-        :param as_of: 本次计算时刻，须与报价使用相同的时区口径。
-        :return: 计算时刻、按得分降序的排名和目标权重（0 至 1）。
-        :raises KeyError: 缺少 ETF 池中的标的。
-        :raises ValueError: 历史不足或计算结果非有限数。
+        输入快照已由行情层校验。
         """
         ranking = []
         for symbol in self.symbols:
             snapshot = snapshots[symbol]
-            if len(snapshot.history) < self.history_points:
-                raise ValueError(f'{symbol}: 历史价格不足')
             prices = np.array([bar.close for bar in snapshot.history] + [snapshot.price], dtype=float)
             y = np.log(prices[-self.momentum_points:])
             x = np.arange(len(y))
             weights = np.linspace(1, 2, len(y))
             slope, intercept = np.polyfit(x, y, 1, w=weights)
             annual_return = math.expm1(float(slope) * self.annual_days)
-            # 保留原聚宽口径：拟合使用w，R²使用w乘平方残差，不改为w²。
+            # 聚宽口径：拟合用 w，R² 用 w 乘平方残差。
             denominator = float(np.sum(weights * (y - np.mean(y)) ** 2))
             r_squared = 0.0 if denominator < 1e-24 else 1 - float(
                 np.sum(weights * (y - (slope * x + intercept)) ** 2)
@@ -73,6 +63,6 @@ class ETFRotationStrategyImpl:
                                      snapshot.history[-1].date))
         ranking.sort(key=lambda item: item.score, reverse=True)
         winner = ranking[0]
-        weight = 1.0 if winner.annual_volatility < 1e-6 else min(1.0, self.target_vol / winner.annual_volatility)
+        weight = 1.0 if winner.annual_volatility < 1e-6 else min(1.0, self.target_volatility / winner.annual_volatility)
         targets = {symbol: weight if symbol == winner.symbol else 0.0 for symbol in self.symbols}
         return StrategyResult(as_of, tuple(ranking), targets)

@@ -36,14 +36,7 @@ class StrategyLogger(logging.Handler):
 
 @contextmanager
 def strategy_logging(root: Path, strategy: str, settings: dict):
-    """提供同时写文件和 stderr 的策略日志，退出时移除并关闭处理器。
-
-    :param root: 仓库根目录，作为相对日志目录的起点。
-    :param strategy: 策略名，也是日志子目录名，仅允许字母、数字、下划线和连字符。
-    :param settings: 日志目录、级别及保留日期数配置。
-    :yields: 本次运行独立使用的 Logger。
-    :raises ValueError: 策略名或保留日期数无效。
-    """
+    """提供独立的文件及控制台日志，退出时关闭处理器。"""
     if not re.fullmatch(r'[A-Za-z0-9_-]+', strategy):
         raise ValueError('策略日志名称只能包含字母、数字、下划线及连字符')
     logger = logging.Logger(f'market_trading_bot.{strategy}')
