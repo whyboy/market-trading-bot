@@ -114,28 +114,6 @@ class AKShareMarket:
         """获取完整交易日历，沿用行情请求超时和间隔配置。"""
         return sorted(set(self._request(ak.calendar_trade_date_hist_sina)['trade_date']))
 
-    def _load_history_test(self, symbols, history_points, as_of):
-        """使用最近已完成交易日收盘数据，按当前时间模拟执行。"""
-        calendar = self.trading_calendar()
-        if not calendar or not calendar[0] <= as_of.date() <= calendar[-1]:
-            raise MarketDataError('交易日历未覆盖当前日期')
-        completed = [day for day in calendar if day < as_of.date()
-                     or day == as_of.date() and as_of.time() >= time(15)]
-        if len(completed) <= history_points:
-            raise MarketDataError('交易日历历史不足')
-        close_day = completed[-1]
-        expected = completed[-history_points - 1:-1]
-        prices = self.closing_prices(symbols, close_day)
-        histories = self._load_history(symbols, expected, close_day)
-        finished_at = datetime.now(SHANGHAI)
-        if finished_at.date() != as_of.date():
-            raise MarketDataError('行情获取跨日期，停止测试')
-        quoted_at = datetime.combine(close_day, time(15), SHANGHAI)
-        self.logger.info('链路测试模式：执行时间=%s 行情日期=%s，仅用于模拟验证', as_of.isoformat(), close_day)
-        snapshots = {symbol: MarketData(symbol, quoted_at, float(prices[symbol]), histories[symbol])
-                     for symbol in symbols}
-        return finished_at, snapshots
-
     def _quotes(self, secids: dict[str, str]) -> dict[str, tuple[float, datetime]]:
         """批量获取未复权价格和报价时间，每个标的须恰好返回一条。"""
         response = self._request(
@@ -187,6 +165,28 @@ class AKShareMarket:
                 raise MarketDataError(f'{symbol}: 价格无效')
             histories[symbol] = history
         return histories
+
+    def _load_history_test(self, symbols, history_points, as_of):
+        """使用最近已完成交易日收盘数据，按当前时间模拟执行。"""
+        calendar = self.trading_calendar()
+        if not calendar or not calendar[0] <= as_of.date() <= calendar[-1]:
+            raise MarketDataError('交易日历未覆盖当前日期')
+        completed = [day for day in calendar if day < as_of.date()
+                     or day == as_of.date() and as_of.time() >= time(15)]
+        if len(completed) <= history_points:
+            raise MarketDataError('交易日历历史不足')
+        close_day = completed[-1]
+        expected = completed[-history_points - 1:-1]
+        prices = self.closing_prices(symbols, close_day)
+        histories = self._load_history(symbols, expected, close_day)
+        finished_at = datetime.now(SHANGHAI)
+        if finished_at.date() != as_of.date():
+            raise MarketDataError('行情获取跨日期，停止测试')
+        quoted_at = datetime.combine(close_day, time(15), SHANGHAI)
+        self.logger.info('链路测试模式：执行时间=%s 行情日期=%s，仅用于模拟验证', as_of.isoformat(), close_day)
+        snapshots = {symbol: MarketData(symbol, quoted_at, float(prices[symbol]), histories[symbol])
+                     for symbol in symbols}
+        return finished_at, snapshots
 
     def _request(self, function, **kwargs):
         """按配置限制请求间隔。"""
