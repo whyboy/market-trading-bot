@@ -1,4 +1,4 @@
-"""行情适配：BaoStock 日线、东财当前报价、上海市场交易日历。"""
+"""行情适配：BaoStock 日线、新浪当前报价、上海市场交易日历。"""
 import akshare as ak
 import json
 import logging
@@ -44,7 +44,7 @@ class AKShareMarket:
     def load(self, symbols: tuple[str, ...], history_points: int) -> tuple[datetime, dict[str, MarketData]]:
         """加载连续历史收盘价及当日报价，校验交易时段、日期和价格。"""
         started_at = datetime.now(SHANGHAI)
-        self.logger.info('行情获取开始 daily=baostock quotes=eastmoney symbols=%s', ','.join(symbols))
+        self.logger.info('行情获取开始 daily=baostock quotes=sina symbols=%s', ','.join(symbols))
         try:
             calendar = self.trading_calendar()
             if not calendar or not calendar[0] <= started_at.date() <= calendar[-1]:
@@ -56,8 +56,8 @@ class AKShareMarket:
                 match = re.fullmatch(r'(\d{6})\.(XSHG|XSHE)', symbol)
                 if not match:
                     raise MarketDataError(f'不支持的证券代码: {symbol}')
-                market_id = '1' if match.group(2) == 'XSHG' else '0'
-                secids[f'{market_id}.{match.group(1)}'] = symbol
+                market_id = 'sh' if match.group(2) == 'XSHG' else 'sz'
+                secids[f'{market_id}{match.group(1)}'] = symbol
             self.logger.info('交易日历获取成功 date=%s coverage=%s~%s', started_at.date(), calendar[0], calendar[-1])
             trading_days = [day for day in calendar if day < started_at.date()][-history_points:]
             if len(trading_days) != history_points:
@@ -116,19 +116,26 @@ class AKShareMarket:
     def _load_quotes(self, secids: dict[str, str]) -> dict[str, tuple[float, datetime]]:
         """批量获取未复权价格和报价时间，每个标的须恰好返回一条。"""
         response = self._request(
-            requests.get, url='https://push2.eastmoney.com/api/qt/ulist.np/get',
-            params={'secids': ','.join(secids), 'fields': 'f2,f12,f13,f124', 'fltt': '2'},
-            timeout=self.timeout)
+            requests.get, url='https://hq.sinajs.cn/list=' + ','.join(secids),
+            headers={'Referer': 'https://finance.sina.com.cn/'}, timeout=self.timeout)
         response.raise_for_status()
-        payload = response.json()
-        if payload.get('rc') != 0 or not payload.get('data'):
-            raise MarketDataError('当前报价接口返回错误或空数据')
+        response.encoding = 'gbk'
         quotes = {}
-        for item in payload['data']['diff']:
-            key = f"{item['f13']}.{item['f12']}"
+        for line in response.text.splitlines():
+            match = re.fullmatch(r'\s*var hq_str_((?:sh|sz)\d{6})="([^"]*)";\s*', line)
+            if not match:
+                raise MarketDataError('新浪当前报价格式错误')
+            key, payload = match.groups()
             if key not in secids or key in quotes:
                 raise MarketDataError('当前报价包含错误或重复证券代码')
-            quotes[key] = (float(item['f2']), datetime.fromtimestamp(int(item['f124']), SHANGHAI))
+            fields = payload.split(',')
+            if len(fields) < 32:
+                raise MarketDataError(f'{secids[key]}: 新浪当前报价缺失字段')
+            try:
+                quoted_at = datetime.strptime(f'{fields[30]} {fields[31]}', '%Y-%m-%d %H:%M:%S')
+                quotes[key] = (float(fields[3]), quoted_at.replace(tzinfo=SHANGHAI))
+            except ValueError as exc:
+                raise MarketDataError(f'{secids[key]}: 新浪当前报价价格或时间无效') from exc
         if set(quotes) != set(secids):
             raise MarketDataError('当前报价缺少标的')
         return {secids[key]: value for key, value in quotes.items()}

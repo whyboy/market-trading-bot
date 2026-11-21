@@ -31,7 +31,15 @@ class MarketFixture:
 
     def load(self, symbols=None):
         response = Mock()
-        response.json.return_value = {'rc': 0, 'data': {'diff': self.quotes}}
+        lines = []
+        for quote in self.quotes:
+            fields = ['0'] * 32
+            fields[3] = str(quote['f2'])
+            quoted_at = datetime.fromtimestamp(quote['f124'], ZoneInfo('Asia/Shanghai'))
+            fields[30], fields[31] = quoted_at.strftime('%Y-%m-%d'), quoted_at.strftime('%H:%M:%S')
+            prefix = 'sh' if quote['f13'] == 1 else 'sz'
+            lines.append(f'var hq_str_{prefix}{quote["f12"]}="{",".join(fields)}";')
+        response.text = '\n'.join(lines)
         with patch.object(MARKET_MODULE, 'datetime', wraps=datetime) as clock, \
                 patch.object(MARKET_MODULE.ak, 'calendar_trade_date_hist_sina', return_value=pd.DataFrame(
                     {'trade_date': [day.date() for day in self.days] + [NOW.date()]})), \

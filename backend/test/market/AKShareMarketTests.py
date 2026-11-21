@@ -2,14 +2,36 @@
 import pandas as pd
 import subprocess
 import unittest
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from market_trading_bot.market.AKShareMarket import AKShareMarket, MarketDataError
 from MarketFixture import MarketFixture
 from unittest.mock import Mock, patch
+from zoneinfo import ZoneInfo
 
 
 class AKShareMarketTests(MarketFixture, unittest.TestCase):
+    def test_sina_quote_parses_price_and_shanghai_time(self):
+        market = AKShareMarket(self.settings)
+        fields = ['0'] * 32
+        fields[3], fields[30], fields[31] = '2.230', '2026-11-20', '14:30:01'
+        response = Mock(text=f'var hq_str_sz159915="{",".join(fields)}";')
+        with patch('market_trading_bot.market.AKShareMarket.requests.get', return_value=response) as request:
+            quotes = market._load_quotes({'sz159915': '159915.XSHE'})
+        self.assertEqual(quotes['159915.XSHE'], (2.23, datetime(2026, 11, 20, 14, 30, 1,
+                                                               tzinfo=ZoneInfo('Asia/Shanghai'))))
+        self.assertEqual(response.encoding, 'gbk')
+        self.assertIn('sz159915', request.call_args.kwargs['url'])
+
+    def test_sina_quote_rejects_invalid_response(self):
+        market = AKShareMarket(self.settings)
+        for body in ('', 'bad response', 'var hq_str_sh510300="";',
+                     'var hq_str_sh510300="' + ','.join(['0'] * 32) + '";'):
+            with self.subTest(body=body), patch('market_trading_bot.market.AKShareMarket.requests.get',
+                                                return_value=Mock(text=body)):
+                with self.assertRaises(MarketDataError):
+                    market._load_quotes({'sh510300': '510300.XSHG'})
+
     def test_baostock_daily_normalizes_dates_and_prices(self):
         market = AKShareMarket(self.settings)
         with patch('market_trading_bot.market.AKShareMarket.subprocess.run',
