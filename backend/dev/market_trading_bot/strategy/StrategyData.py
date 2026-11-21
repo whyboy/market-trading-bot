@@ -17,7 +17,7 @@ class RankedETF:
 
 
 @dataclass(frozen=True)
-class StrategyResult:
+class StrategyData:
     """策略信号：计算时刻、降序排名和各标的目标权重（0 至 1）。"""
 
     as_of: datetime
