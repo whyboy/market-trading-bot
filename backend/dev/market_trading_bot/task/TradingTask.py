@@ -15,8 +15,9 @@ class TradingTask:
 
     def __init__(self, strategy, market, executor, account_store, status_store, *,
                  strategy_id, instance_id, initial_cash, scheduled_at, notifier, trade_timeout_seconds=300,
-                 log_context=None):
+                 log_context=None, test_mode=False):
         """创建交易线程；scheduled_at 决定记账日期，超时仅用于监控。"""
+        self.test_mode = test_mode
         self.strategy = strategy
         self.market = market
         self.executor = executor
@@ -56,7 +57,7 @@ class TradingTask:
                 self.logger = logger
                 self.market.logger = logger
                 self._heartbeat()
-                logger.info('任务开始 strategy=%s instance=%s', self.strategy_id, self.instance_id)
+                logger.info('任务开始 strategy=%s instance=%s test_mode=%s', self.strategy_id, self.instance_id, self.test_mode)
                 try:
                     if self.stop_event.is_set():
                         execution.update(success=False, error='任务已停止')
@@ -92,6 +93,8 @@ class TradingTask:
                                  self.instance_id, rank, item.symbol, item.score, signal.target_weights[item.symbol])
             self.logger.info('策略计算完成 instance=%s target_weights=%s', self.instance_id, signal.target_weights)
             committed = self._rebalance(signal)
+        else:
+            self.logger.info('复用当日已记账结果 instance=%s date=%s', self.instance_id, committed['date'])
         output = {'operation': 'pap_rebalance', 'instance_id': self.instance_id, **committed}
         try:
             self.account_store.export_trades()

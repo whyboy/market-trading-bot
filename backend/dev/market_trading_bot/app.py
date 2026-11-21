@@ -7,6 +7,7 @@ from datetime import date
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from market_trading_bot.config import load_settings
 from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
 from market_trading_bot.TaskScheduler import TaskScheduler
 from pathlib import Path
@@ -60,7 +61,7 @@ def account(instance_id: str):
         raise HTTPException(404, '账户不存在')
     if not any(instance['id'] == instance_id for item in load_strategies() for instance in item.get('instances', [])):
         raise HTTPException(404, '账户不存在')
-    return PapAccountRepository.get_latest_account(ROOT / load_settings()['storage']['data_dir'], instance_id)
+    return PapAccountRepository.get_latest_account(ROOT / load_settings(ROOT)['storage']['data_dir'], instance_id)
 
 
 @app.get('/api/strategies/{strategy_id}/logs')
@@ -101,7 +102,7 @@ def log_dir(strategy_id):
     get_strategy(strategy_id, load_strategies())
     if not re.fullmatch(r'[A-Za-z0-9_-]+', strategy_id):
         raise HTTPException(404, '策略不存在')
-    return ROOT / load_settings()['logging']['directory'] / strategy_id
+    return ROOT / load_settings(ROOT)['logging']['directory'] / strategy_id
 
 
 def get_strategy(strategy_id, configs):
@@ -113,7 +114,3 @@ def get_strategy(strategy_id, configs):
 
 def load_strategies():
     return [json.loads(path.read_text()) for path in sorted((ROOT / 'market_trading_bot/config').glob('*_strategy.json'))]
-
-
-def load_settings():
-    return json.loads((ROOT / 'market_trading_bot/config/global.json').read_text())

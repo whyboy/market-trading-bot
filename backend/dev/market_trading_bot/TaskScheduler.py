@@ -5,6 +5,7 @@ import logging
 import threading
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime, time, timezone
+from market_trading_bot.config import load_settings
 from market_trading_bot.log.StrategyLogger import strategy_logging
 from market_trading_bot.market.AKShareMarket import AKShareMarket, SHANGHAI
 from market_trading_bot.notification.PushPlusNotifier import PushPlusNotifier
@@ -24,6 +25,7 @@ class TaskScheduler:
     def __init__(self, root: Path):
         """准备调度器；root 为 backend/dev 目录。"""
         self.root = root
+        self.test_mode = False
         self.tasks = {}  # (策略ID, 账户ID) -> 最近一次任务（可能已完成）
         self.configs = {}
         self.calendar_day = None
@@ -49,7 +51,8 @@ class TaskScheduler:
 
     def start(self):
         """取得部署锁并注册定时任务；晚启动补做当天日历、估值和日报。"""
-        self.settings = json.loads((self.root / 'market_trading_bot/config/global.json').read_text())
+        self.settings = load_settings(self.root)
+        self.test_mode = self.settings.get('runtime', {}).get('test_mode', False)
         directory = self.root / self.settings['storage']['data_dir'] / 'runtime'
         directory.mkdir(parents=True, exist_ok=True)
         self.lock_file = (directory / 'scheduler.lock').open('a')
@@ -66,33 +69,39 @@ class TaskScheduler:
                 if config.get('enable', True):
                     strategy_id = config['strategy']
                     self.configs[strategy_id] = config
-            # 每天北京时间 15:05 更新收盘估值。
-            self.timer.add_job(self._start_valuation, 'cron', hour=15, minute=5, id='_daily_valuation',
-                               coalesce=True, max_instances=1, misfire_grace_time=None)
-            # 每天北京时间 15:10 汇总并推送日报。
-            self.timer.add_job(self._start_summary, 'cron', hour=15, minute=10, id='_daily_report',
-                               coalesce=True, max_instances=1, misfire_grace_time=None)
-            # 每天北京时间 9:00 确认交易日并安排交易。
-            self.timer.add_job(self.prepare_day, 'cron', hour=9, minute=0, id='_calendar',
+            if not self.test_mode:
+                # 每天北京时间 15:05 更新收盘估值。
+                self.timer.add_job(self._start_valuation, 'cron', hour=15, minute=5, id='_daily_valuation',
+                                   coalesce=True, max_instances=1, misfire_grace_time=None)
+                # 每天北京时间 15:10 汇总并推送日报。
+                self.timer.add_job(self._start_summary, 'cron', hour=15, minute=10, id='_daily_report',
+                                   coalesce=True, max_instances=1, misfire_grace_time=None)
+            # 正常模式 9:00 检查交易日，测试模式每天零点安排任务。
+            self.timer.add_job(self.prepare_day, 'cron', hour=0 if self.test_mode else 9, minute=0, id='_calendar',
                                coalesce=True, max_instances=1, misfire_grace_time=300)
             # 每 5 秒更新服务心跳。
             self.timer.add_job(self._heartbeat, 'interval', seconds=5, id='_heartbeat')
             self.timer.start()
-            if self.now().time() >= time(9):
+            if self.test_mode or self.now().time() >= time(9):
                 self.timer.add_job(self.prepare_day, id='_startup_calendar')
-            if self.now().time() >= time(15, 5):
+            if not self.test_mode and self.now().time() >= time(15, 5):
                 self.timer.add_job(self._recover_daily, id='_startup_daily_tasks')
         except BaseException:
             self.stop()
             raise
 
     def prepare_day(self):
-        """确认交易日并安排当天尚未到点的交易；失败每 5 秒重试至 15:00。"""
+        """安排当天未来任务；正常模式检查交易日，测试模式允许收盘后及休市日执行。"""
         if not self.configs or not self.calendar_lock.acquire(blocking=False):
             return
         day = self.now().date()
         try:
             if self.prepared_day == day:
+                return
+            if self.test_mode:
+                self.calendar_day = day
+                self._schedule_trades(day)
+                self.prepared_day = day
                 return
             market = AKShareMarket(self.settings['market'])
             while not self.stop_event.is_set() and self.now().date() == day and self.now().time() < time(15):
@@ -104,12 +113,7 @@ class TaskScheduler:
                     self.calendar_day = day
                     self.is_trading_day = context['is_trading_day']
                     if self.is_trading_day:
-                        for strategy_id, config in self.configs.items():
-                            due = datetime.combine(day, time.fromisoformat(config['schedule']['trade_time']), SHANGHAI)
-                            if due > self.now():
-                                self.timer.add_job(
-                                    self._start_trades, 'date', run_date=due, args=[strategy_id, day],
-                                    id=strategy_id, replace_existing=True, misfire_grace_time=5)
+                        self._schedule_trades(day)
                     return
                 except Exception as exc:
                     self.calendar_error = str(exc)
@@ -118,6 +122,14 @@ class TaskScheduler:
                         return
         finally:
             self.calendar_lock.release()
+
+    def _schedule_trades(self, day):
+        """按北京时间安排当天尚未到点的策略任务。"""
+        for strategy_id, config in self.configs.items():
+            due = datetime.combine(day, time.fromisoformat(config['schedule']['trade_time']), SHANGHAI)
+            if due > self.now():
+                self.timer.add_job(self._start_trades, 'date', run_date=due, args=[strategy_id, day],
+                                   id=strategy_id, replace_existing=True, misfire_grace_time=300 if self.test_mode else 5)
 
     def _recover_daily(self):
         """晚启动先补估值；已过15:10时等待补估值结束再发送当天日报。"""
@@ -212,7 +224,9 @@ class TaskScheduler:
     def _start_trades(self, strategy_id, day):
         """为启用账户启动独立交易任务，跳过仍在运行的账户。"""
         with self.tasks_lock:
-            if self.stop_event.is_set() or not self.is_trading_day or day != self.now().date() or self.calendar_day != day:
+            if self.stop_event.is_set() or day != self.now().date() or self.calendar_day != day:
+                return
+            if not self.test_mode and not self.is_trading_day:
                 return
             config = self.configs[strategy_id]
             scheduled_at = datetime.combine(day, time.fromisoformat(config['schedule']['trade_time']), SHANGHAI)
@@ -238,12 +252,12 @@ class TaskScheduler:
         data_dir = self.root / self.settings['storage']['data_dir']
         return TradingTask(
             strategy=ETFRotationStrategyImpl(config['parameters']),
-            market=AKShareMarket(self.settings['market']),
+            market=AKShareMarket(self.settings['market'], test_mode=self.test_mode),
             executor=PapTrader(instance['execution'], config['instruments']),
             account_store=PapAccountRepository(data_dir, instance['id'], strategy_id),
             status_store=TaskStatusRepository(data_dir, strategy_id, instance['id']),
             strategy_id=strategy_id, instance_id=instance['id'], initial_cash=instance['initial_cash'],
-            scheduled_at=scheduled_at, notifier=self.notifier,
+            scheduled_at=scheduled_at, notifier=self.notifier, test_mode=self.test_mode,
             trade_timeout_seconds=self.settings.get('runtime', {}).get('trade_timeout_seconds', 300),
             log_context=strategy_logging(self.root, strategy_id, self.settings['logging']))
 
@@ -285,7 +299,7 @@ class TaskScheduler:
         healthy = self.timer.running and (now - datetime.fromisoformat(self.heartbeat_at)).total_seconds() <= 20
         job = self.timer.get_job(strategy_id)
         config = self.configs.get(strategy_id, {})
-        return {**status, 'strategy': strategy_id, 'state': 'running' if active_tasks else 'idle',
+        return {**status, 'test_mode': self.test_mode, 'strategy': strategy_id, 'state': 'running' if active_tasks else 'idle',
                 'online': healthy and not timed_out,
                 'health': 'trade_timeout' if timed_out else 'idle' if healthy else 'stopped',
                 'heartbeat_scope': 'task' if active_tasks else 'scheduler',
