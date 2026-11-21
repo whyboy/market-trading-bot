@@ -44,7 +44,7 @@ class MarketFixture:
                 patch.object(MARKET_MODULE.ak, 'calendar_trade_date_hist_sina', return_value=pd.DataFrame(
                     {'trade_date': [day.date() for day in self.days] + [NOW.date()]})), \
                 patch.object(AKShareMarket, '_daily', return_value=self.daily), \
-                patch.object(MARKET_MODULE.requests, 'get', return_value=response) as request:
+                patch('market_trading_bot.market.HttpMarket.requests.get', return_value=response) as request:
             clock.now.return_value = NOW
             result = AKShareMarket(self.settings).load(
                 self.strategy.symbols if symbols is None else symbols, self.strategy.history_points)

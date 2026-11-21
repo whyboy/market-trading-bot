@@ -5,6 +5,9 @@ import unittest
 from datetime import date, datetime
 from decimal import Decimal
 from market_trading_bot.market.AKShareMarket import AKShareMarket, MarketDataError
+from market_trading_bot.market.BaoStockDaily import BaoStockDaily
+from market_trading_bot.market.HttpMarket import HttpMarket
+from market_trading_bot.market.MarketSource import MarketSource
 from MarketFixture import MarketFixture
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
@@ -12,41 +15,67 @@ from zoneinfo import ZoneInfo
 
 class AKShareMarketTests(MarketFixture, unittest.TestCase):
     def test_sina_quote_parses_price_and_shanghai_time(self):
-        market = AKShareMarket(self.settings)
+        market = HttpMarket(15)
         fields = ['0'] * 32
         fields[3], fields[30], fields[31] = '2.230', '2026-11-20', '14:30:01'
         response = Mock(text=f'var hq_str_sz159915="{",".join(fields)}";')
-        with patch('market_trading_bot.market.AKShareMarket.requests.get', return_value=response) as request:
-            quotes = market._load_quotes({'sz159915': '159915.XSHE'})
+        with patch('market_trading_bot.market.HttpMarket.requests.get', return_value=response) as request:
+            quotes = market.quotes(['159915.XSHE'], 'sina')
         self.assertEqual(quotes['159915.XSHE'], (2.23, datetime(2026, 11, 20, 14, 30, 1,
                                                                tzinfo=ZoneInfo('Asia/Shanghai'))))
         self.assertEqual(response.encoding, 'gbk')
-        self.assertIn('sz159915', request.call_args.kwargs['url'])
+        self.assertIn('sz159915', request.call_args.args[0])
 
     def test_sina_quote_rejects_invalid_response(self):
-        market = AKShareMarket(self.settings)
+        market = HttpMarket(15)
         for body in ('', 'bad response', 'var hq_str_sh510300="";',
                      'var hq_str_sh510300="' + ','.join(['0'] * 32) + '";'):
-            with self.subTest(body=body), patch('market_trading_bot.market.AKShareMarket.requests.get',
+            with self.subTest(body=body), patch('market_trading_bot.market.HttpMarket.requests.get',
                                                 return_value=Mock(text=body)):
-                with self.assertRaises(MarketDataError):
-                    market._load_quotes({'sh510300': '510300.XSHG'})
+                with self.assertRaises(ValueError):
+                    market.quotes(['510300.XSHG'], 'sina')
 
     def test_baostock_daily_normalizes_dates_and_prices(self):
-        market = AKShareMarket(self.settings)
-        with patch('market_trading_bot.market.AKShareMarket.subprocess.run',
+        market = BaoStockDaily(15)
+        with patch('market_trading_bot.market.BaoStockDaily.subprocess.run',
                    return_value=Mock(stdout='[["2026-11-20", "3.5000"]]')) as run:
-            frame = market._daily('510300.XSHG', '20261101', '20261120', 'qfq')
+            frame = market.daily('510300.XSHG', '2026-11-01', '2026-11-20', 'qfq')
         self.assertEqual(frame.to_dict('records'), [{'日期': '2026-11-20', '收盘': '3.5000'}])
         self.assertEqual(run.call_args.kwargs['timeout'], market.timeout)
         self.assertIn('"qfq"', run.call_args.kwargs['input'])
 
     def test_baostock_daily_timeout_is_market_error(self):
-        market = AKShareMarket(self.settings)
-        with patch('market_trading_bot.market.AKShareMarket.subprocess.run',
+        market = BaoStockDaily(15)
+        with patch('market_trading_bot.market.BaoStockDaily.subprocess.run',
                    side_effect=subprocess.TimeoutExpired('baostock', 1)):
-            with self.assertRaises(MarketDataError):
-                market._daily('510300.XSHG', '20261101', '20261120', '')
+            with self.assertRaises(subprocess.TimeoutExpired):
+                market.daily('510300.XSHG', '2026-11-01', '2026-11-20', '')
+
+    def test_daily_falls_back_to_tencent_with_same_adjustment(self):
+        source = MarketSource(15)
+        expected = pd.DataFrame({'日期': ['2026-11-20'], '收盘': ['2.23']})
+        with patch.object(source.baostock, 'daily', side_effect=TimeoutError), \
+                patch.object(source.http, 'daily', return_value=expected) as fetch:
+            self.assertIs(source.daily('159915.XSHE', '2026-11-01', '2026-11-20', 'qfq'), expected)
+        fetch.assert_called_once_with('159915.XSHE', '2026-11-01', '2026-11-20', 'qfq', 'tencent')
+
+    def test_tencent_quote_and_stale_sina_fallback(self):
+        fields = ['0'] * 31
+        fields[2], fields[3], fields[30] = '159915', '2.230', '20261120143000'
+        response = Mock(text=f'v_sz159915="{"~".join(fields)}";')
+        now = datetime(2026, 11, 20, 14, 30, 10, tzinfo=ZoneInfo('Asia/Shanghai'))
+        source = MarketSource(15)
+        with patch('market_trading_bot.market.HttpMarket.requests.get', side_effect=[Mock(text=''), response]):
+            self.assertEqual(source.quotes(['159915.XSHE'], lambda: now, 60)['159915.XSHE'][0], 2.23)
+
+    def test_missing_daily_date_triggers_fallback(self):
+        source = MarketSource(15)
+        missing = pd.DataFrame({'日期': ['2026-11-19'], '收盘': ['2.30']})
+        expected = pd.DataFrame({'日期': ['2026-11-20'], '收盘': ['2.23']})
+        with patch.object(source.baostock, 'daily', return_value=missing), \
+                patch.object(source.http, 'daily', return_value=expected):
+            self.assertIs(source.daily('159915.XSHE', '2026-11-01', '2026-11-20', 'qfq',
+                                       [date(2026, 11, 20)]), expected)
 
     def test_market_rejects_invalid_inputs(self):
         cases = ('invalid_symbol', 'missing_day', 'duplicate_day', 'zero_price',

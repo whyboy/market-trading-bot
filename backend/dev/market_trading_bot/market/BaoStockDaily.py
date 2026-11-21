@@ -3,10 +3,22 @@ import baostock as bs
 import contextlib
 import io
 import json
+import pandas as pd
+import subprocess
 import sys
 
 
 class BaoStockDaily:
+    def __init__(self, timeout):
+        self.timeout = timeout
+
+    def daily(self, symbol, start, end, adjust):
+        result = subprocess.run(
+            [sys.executable, '-m', 'market_trading_bot.market.BaoStockDaily'],
+            input=json.dumps([symbol, start, end, adjust]), text=True, capture_output=True,
+            timeout=self.timeout, check=True)
+        return pd.DataFrame(json.loads(result.stdout), columns=['日期', '收盘'])
+
     @staticmethod
     def fetch(symbol, start, end, adjust):
         """读取指定证券的日线；调用方负责限制整个进程的运行时间。"""
