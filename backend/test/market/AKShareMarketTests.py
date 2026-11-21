@@ -1,14 +1,31 @@
 """离线验证行情校验边界及信号计算。"""
 import pandas as pd
+import subprocess
 import unittest
 from datetime import date
 from decimal import Decimal
 from market_trading_bot.market.AKShareMarket import AKShareMarket, MarketDataError
 from MarketFixture import MarketFixture
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 class AKShareMarketTests(MarketFixture, unittest.TestCase):
+    def test_baostock_daily_normalizes_dates_and_prices(self):
+        market = AKShareMarket(self.settings)
+        with patch('market_trading_bot.market.AKShareMarket.subprocess.run',
+                   return_value=Mock(stdout='[["2026-11-20", "3.5000"]]')) as run:
+            frame = market._daily('510300.XSHG', '20261101', '20261120', 'qfq')
+        self.assertEqual(frame.to_dict('records'), [{'日期': '2026-11-20', '收盘': '3.5000'}])
+        self.assertEqual(run.call_args.kwargs['timeout'], market.timeout)
+        self.assertIn('"qfq"', run.call_args.kwargs['input'])
+
+    def test_baostock_daily_timeout_is_market_error(self):
+        market = AKShareMarket(self.settings)
+        with patch('market_trading_bot.market.AKShareMarket.subprocess.run',
+                   side_effect=subprocess.TimeoutExpired('baostock', 1)):
+            with self.assertRaises(MarketDataError):
+                market._daily('510300.XSHG', '20261101', '20261120', '')
+
     def test_market_rejects_invalid_inputs(self):
         cases = ('invalid_symbol', 'missing_day', 'duplicate_day', 'zero_price',
                  'nan_price', 'stale_quote', 'future_quote', 'missing_quote', 'duplicate_quote')

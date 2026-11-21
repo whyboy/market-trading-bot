@@ -1,10 +1,13 @@
-"""AKShare适配：东财前复权日线、批量当前报价、上海市场交易日历。"""
+"""行情适配：BaoStock 日线、东财当前报价、上海市场交易日历。"""
 import akshare as ak
+import json
 import logging
 import math
 import pandas as pd
 import re
 import requests
+import subprocess
+import sys
 import time as clock
 from akshare.utils.context import config as ak_config
 from datetime import datetime, time, timedelta
@@ -41,7 +44,7 @@ class AKShareMarket:
     def load(self, symbols: tuple[str, ...], history_points: int) -> tuple[datetime, dict[str, MarketData]]:
         """加载连续历史收盘价及当日报价，校验交易时段、日期和价格。"""
         started_at = datetime.now(SHANGHAI)
-        self.logger.info('行情获取开始 provider=akshare_eastmoney symbols=%s', ','.join(symbols))
+        self.logger.info('行情获取开始 daily=baostock quotes=eastmoney symbols=%s', ','.join(symbols))
         try:
             calendar = self.trading_calendar()
             if not calendar or not calendar[0] <= started_at.date() <= calendar[-1]:
@@ -93,8 +96,8 @@ class AKShareMarket:
         for symbol in sorted(symbols):
             if not re.fullmatch(r'\d{6}\.(XSHG|XSHE)', symbol):
                 raise MarketDataError(f'不支持的证券代码: {symbol}')
-            daily = self._request(ak.fund_etf_hist_em, symbol=symbol.split('.')[0], period='daily',
-                                  start_date=day.strftime('%Y%m%d'), end_date=day.strftime('%Y%m%d'), adjust='')
+            daily = self._request(self._daily, symbol=symbol, start_date=day.strftime('%Y%m%d'),
+                                  end_date=day.strftime('%Y%m%d'), adjust='')
             if daily.empty:
                 raise MarketDataError(f'{symbol}: {day} 收盘价尚未更新')
             dates = pd.to_datetime(daily['日期'], errors='raise').dt.date
@@ -146,8 +149,8 @@ class AKShareMarket:
         end_date = (before_day - timedelta(days=1)).strftime('%Y%m%d')
         histories = {}
         for symbol in symbols:
-            daily = self._request(ak.fund_etf_hist_em,
-                symbol=symbol.split('.')[0], period='daily', start_date=start_date, end_date=end_date, adjust='qfq')
+            daily = self._request(self._daily,
+                symbol=symbol, start_date=start_date, end_date=end_date, adjust='qfq')
             self.logger.info('历史日线获取结果 symbol=%s rows=%d window_days=%d', symbol, len(daily), self.lookback_days)
             if daily.empty:
                 raise MarketDataError(f'{symbol}: 无历史行情')
@@ -186,6 +189,19 @@ class AKShareMarket:
         snapshots = {symbol: MarketData(symbol, quoted_at, float(prices[symbol]), histories[symbol])
                      for symbol in symbols}
         return finished_at, snapshots
+
+    def _daily(self, symbol, start_date, end_date, adjust):
+        """通过受超时约束的独立进程查询日线，隔离 BaoStock 的全局连接。"""
+        start = datetime.strptime(start_date, '%Y%m%d').date().isoformat()
+        end = datetime.strptime(end_date, '%Y%m%d').date().isoformat()
+        try:
+            result = subprocess.run(
+                [sys.executable, '-m', 'market_trading_bot.market.BaoStockDaily'],
+                input=json.dumps([symbol, start, end, adjust]), text=True, capture_output=True,
+                timeout=self.timeout, check=True)
+            return pd.DataFrame(json.loads(result.stdout), columns=['日期', '收盘'])
+        except (subprocess.SubprocessError, ValueError) as exc:
+            raise MarketDataError(f'{symbol}: BaoStock 日线请求失败或超时: {exc}') from exc
 
     def _request(self, function, **kwargs):
         """按配置限制请求间隔。"""

@@ -43,7 +43,7 @@ class AfterHoursTradingTests(unittest.TestCase):
         self.addCleanup(self.market_clock.stop)
         for item in (
             patch.object(MARKET.ak, 'calendar_trade_date_hist_sina', return_value=pd.DataFrame({'trade_date': self.days})),
-            patch.object(MARKET.ak, 'fund_etf_hist_em', side_effect=self.history),
+            patch.object(AKShareMarket, '_daily', side_effect=self.history),
         ):
             item.start()
             self.addCleanup(item.stop)
