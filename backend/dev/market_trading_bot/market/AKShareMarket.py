@@ -118,7 +118,13 @@ class AKShareMarket:
             raise MarketDataError(f'行情获取失败: {exc}') from exc
 
     def closing_prices(self, symbols, day):
-        """读取指定交易日不复权收盘价；拒绝缺失、重复、过期或非法价格。"""
+        """查询指定交易日的 ETF 不复权收盘价。
+
+        :param symbols: 证券代码集合，如 510300.XSHG。
+        :param day: 收盘价所属交易日。
+        :return: 证券代码到 Decimal 收盘价的映射，空集合返回空字典。
+        :raises MarketDataError: 代码、行情日期或价格无效，或收盘数据缺失。
+        """
         prices = {}
         for symbol in sorted(symbols):
             if not re.fullmatch(r'\d{6}\.(XSHG|XSHE)', symbol):

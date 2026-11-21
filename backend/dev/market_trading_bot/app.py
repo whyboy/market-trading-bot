@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
+    """随应用启动调度器，退出时等待任务结束并释放资源。"""
     scheduler = TaskScheduler(ROOT)
     scheduler.start()
     application.state.scheduler = scheduler
@@ -31,6 +32,10 @@ app = FastAPI(title='交易程序监控', docs_url=None, redoc_url=None, lifespa
 
 @app.get('/api/runtime')
 def runtime(strategy_id: str | None = None, instance_id: str | None = None):
+    """查询指定策略或账户的运行状态，未指定策略时使用第一个策略。
+
+    :raises HTTPException: 账户不属于所选策略时返回 404。
+    """
     configurations = strategies()
     if not configurations:
         return {'state': 'unknown', 'online': False}
@@ -53,6 +58,11 @@ def list_strategies():
 
 @app.get('/api/accounts/{instance_id}')
 def account(instance_id: str):
+    """只读查询账户最近交易快照，未开户时返回 initialized=False。
+
+    :param instance_id: 配置中的账户 ID。
+    :raises HTTPException: 账户 ID 无效或未配置时返回 404。
+    """
     if not re.fullmatch(r'[A-Za-z0-9_-]+', instance_id):
         raise HTTPException(404, '账户不存在')
     if not any(instance['id'] == instance_id for item in strategies() for instance in item.get('instances', [])):

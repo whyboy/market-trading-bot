@@ -84,12 +84,16 @@ class TaskScheduler:
                     strategy_id = config['strategy']
                     self.configs[strategy_id] = config
                     self.paths[strategy_id] = path
+            # 每天北京时间15:05启动收盘估值任务，更新账户每日收益。
             self.timer.add_job(self._start_daily_valuation_task, 'cron', hour=15, minute=5, id='_daily_valuation',
                                coalesce=True, max_instances=1, misfire_grace_time=None)
+            # 每天北京时间15:10启动日报任务，汇总并推送账户运行结果。
             self.timer.add_job(self._start_daily_summary_task, 'cron', hour=15, minute=10, id='_daily_report',
                                coalesce=True, max_instances=1, misfire_grace_time=None)
+            # 每天北京时间9:00确认交易日，并注册当天各策略的交易任务。
             self.timer.add_job(self.prepare_day, 'cron', hour=9, minute=0, id='_calendar',
                                coalesce=True, max_instances=1, misfire_grace_time=300)
+            # 每5秒更新服务心跳，供网页监控调度服务状态。
             self.timer.add_job(self._heartbeat, 'interval', seconds=5, id='_heartbeat')
             self.timer.start()
             if self.now().time() >= time(9):
@@ -138,6 +142,14 @@ class TaskScheduler:
         finally:
             self.calendar_guard.release()
 
+    def _recover_daily_tasks(self):
+        """晚启动先补估值；已过15:10时等待补估值结束再发送当天日报。"""
+        self._start_daily_valuation_task()
+        if self.now().time() >= time(15, 10):
+            if self.daily_valuation_task is not None:
+                self.daily_valuation_task.thread.join()
+            self._start_daily_summary_task()
+
     def _start_daily_valuation_task(self):
         """15:05启动估值任务，只更新 daily_results；同一进程每天启动一次。"""
         if not self.valuation_guard.acquire(blocking=False):
@@ -180,15 +192,12 @@ class TaskScheduler:
         finally:
             self.daily_guard.release()
 
-    def _recover_daily_tasks(self):
-        """晚启动先补估值；已过15:10时等待补估值结束再发送当天日报。"""
-        self._start_daily_valuation_task()
-        if self.now().time() >= time(15, 10):
-            if self.daily_valuation_task is not None:
-                self.daily_valuation_task.thread.join()
-            self._start_daily_summary_task()
-
     def _daily_context_for(self, day):
+        """取得当天日报共用的日历信息，并在本进程内缓存结果。
+
+        :param day: 任务日期。
+        :return: 日期、是否交易日及上一交易日；最多尝试 3 次，失败返回 notice。
+        """
         if self.daily_context is not None and self.daily_context['day'] == day:
             return self.daily_context
         market = AKShareMarket(self.settings['market'])
@@ -209,7 +218,13 @@ class TaskScheduler:
         return context
 
     def _load_calendar_context(self, day, market):
-        """统一加载并缓存当天日历，供交易计划和日报任务共用。"""
+        """加载并缓存当天交易日历，供交易计划和日报共用。
+
+        :param day: 待判断的日期。
+        :param market: 交易日历查询对象。
+        :return: day、is_trading_day、previous_trading_day 字典。
+        :raises ValueError: 日历未覆盖当天或上一交易日。
+        """
         with self.calendar_guard:
             if self.calendar_loaded_day != day:
                 calendar = market.trading_calendar()
@@ -222,6 +237,12 @@ class TaskScheduler:
                     'previous_trading_day': max(value for value in self.calendar if value < day)}
 
     def _is_task_running(self, strategy_id, instance_id):
+        """判断指定策略账户的交易线程是否仍在运行。
+
+        :param strategy_id: 策略 ID。
+        :param instance_id: 账户 ID。
+        :return: 线程存在且存活时为 True。
+        """
         with self.guard:
             task = self.tasks.get((strategy_id, instance_id))
         return task is not None and task.thread.is_alive()

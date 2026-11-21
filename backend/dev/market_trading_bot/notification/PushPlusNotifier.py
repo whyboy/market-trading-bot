@@ -23,7 +23,11 @@ class PushPlusNotifier:
                               task.strategy_id, task.instance_id)
 
     def send_daily_summary_report(self, day, summaries):
-        """将所有策略和账户的估值合并为一份每日总结并发送。"""
+        """将所有策略和账户汇总为一份日报并发送，失败仅记录日志。
+
+        :param day: 报告日期。
+        :param summaries: 列表，每项包含 strategy_id、instance_id 和 summary。
+        """
         try:
             title, content = DailyAccountReport.build(day, summaries)
             self.client.send(title, content)

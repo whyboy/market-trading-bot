@@ -31,6 +31,12 @@ class DailyAccountReport:
 
     @staticmethod
     def build(day, summaries):
+        """将所有账户按策略分组，生成一份每日收益消息。
+
+        :param day: 报告日期。
+        :param summaries: 列表，每项包含 strategy_id、instance_id 和 summary。
+        :return: (标题, 纯文本正文)。
+        """
         title = f'每日收益总结｜{day.isoformat()}'
         lines = [f'日期：{day.isoformat()}']
         if not summaries:
@@ -44,6 +50,12 @@ class DailyAccountReport:
 
     @staticmethod
     def _account_lines(instance_id, summary):
+        """生成一个账户的正文行；异常显示提示，休市日省略当日收益。
+
+        :param instance_id: 账户 ID。
+        :param summary: 估值数据或包含 notice 的提示字典。
+        :return: 正文行列表。
+        """
         lines = [f'账户：{instance_id}']
         if summary.get('notice'):
             lines.append(summary['notice'])

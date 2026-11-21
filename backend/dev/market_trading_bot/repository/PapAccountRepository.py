@@ -14,7 +14,13 @@ class PapAccountRepository:
     """按账户保存基础信息、每日交易与收盘估值，同日交易唯一约束防止重复成交。"""
 
     def __init__(self, directory: Path, instance_id: str, strategy_id: str = ''):
-        """每个账户独立数据库，仅 account、daily_results 两张表；自动迁移旧 runs 表。"""
+        """打开账户独立数据库，创建 account、daily_results 表并迁移旧 runs 表。
+
+        :param directory: 所有账户的数据根目录。
+        :param instance_id: 账户 ID，也是数据库所在目录名。
+        :param strategy_id: 所属策略 ID；空字符串不校验归属。
+        :raises ValueError: 账户 ID 无效或账户已属于其他策略。
+        """
         if not re.fullmatch(r'[A-Za-z0-9_-]+', instance_id):
             raise ValueError('实例ID只能包含字母、数字、下划线及连字符')
         self.instance_id = instance_id
@@ -50,7 +56,10 @@ class PapAccountRepository:
 
     @staticmethod
     def get_latest_account(directory: Path, instance_id: str) -> dict:
-        """只读查询最近账户快照；没有账本时不创建目录或账户。"""
+        """只读查询最近交易快照，不创建目录或账户。
+
+        :return: 现金、持仓、执行时资产和开户资金；无记账记录返回 initialized=False。
+        """
         snapshot = PapAccountRepository.get_account_snapshot_on_or_before(directory, instance_id, '9999-12-31')
         if not snapshot['initialized']:
             return snapshot
@@ -61,7 +70,13 @@ class PapAccountRepository:
 
     @staticmethod
     def get_account_snapshot_on_or_before(directory: Path, instance_id: str, day: str) -> dict:
-        """只读取得指定日期及之前的最新完整账本，包含成交和实际开户资金。"""
+        """只读查询指定日期及之前最近一次已提交的完整交易记录。
+
+        :param directory: 所有账户的数据根目录。
+        :param instance_id: 账户 ID。
+        :param day: 截止日期，格式 YYYY-MM-DD，包含当天。
+        :return: 含成交、持仓及实际开户资金的快照；无记录返回 initialized=False。
+        """
         if not re.fullmatch(r'[A-Za-z0-9_-]+', instance_id):
             raise ValueError('实例ID只能包含字母、数字、下划线及连字符')
         database = (directory / instance_id / 'ledger.sqlite3').resolve()
@@ -83,14 +98,26 @@ class PapAccountRepository:
         return {**snapshot, 'initialized': True, 'initial_cash': initial_cash}
 
     def find_execution_by_date(self, day: str) -> dict | None:
-        """读取指定日期已提交的结果；未运行返回 None。"""
+        """查询指定日期已提交的交易结果，不把估值记录当作交易。
+
+        :param day: 交易日期，格式 YYYY-MM-DD。
+        :return: 交易结果字典；当天未记账返回 None。
+        """
         with closing(sqlite3.connect(self.database)) as connection, connection:
             row = connection.execute('SELECT execution_payload FROM daily_results WHERE day = ?', (day,)).fetchone()
         return json.loads(row[0]) if row and row[0] is not None else None
 
     @contextmanager
     def begin_rebalance_transaction(self, day: str, initial_cash: float):
-        """锁定最新账户并检查当日结果，由调用方计算后保存，整体提交或回滚。"""
+        """开启调仓事务，锁定最新账户并检查当天是否已记账。
+
+        :param day: 记账日期，格式 YYYY-MM-DD。
+        :param initial_cash: 首次开户资金，已有账户时忽略。
+        :yield: Transaction，包含 account、completed 和保存入口。
+        :raises RuntimeError: 当天未记账且调用方未保存结果。
+
+        正常退出提交；计算、保存或调用方抛出异常时全部回滚。
+        """
         with closing(sqlite3.connect(self.database, timeout=30)) as connection, connection:
             connection.execute('BEGIN IMMEDIATE')
             row = connection.execute('SELECT execution_payload FROM daily_results WHERE day = ?', (day,)).fetchone()
@@ -115,6 +142,7 @@ class PapAccountRepository:
         """仅供事务内使用的账户快照与保存入口，不依赖策略或执行器。"""
 
         def __init__(self, connection, day, account, completed):
+            """保存事务内账户快照及当天已完成结果，不单独提交事务。"""
             self.connection = connection
             self.day = day
             self.account = account
@@ -122,6 +150,12 @@ class PapAccountRepository:
             self.saved = False
 
         def save_execution_result(self, result: dict) -> dict:
+            """在当前事务中保存交易结果，并清除当天旧估值、将状态置为 pending。
+
+            :param result: 交易结果，date 必须等于事务日期。
+            :return: 序列化后可写入账本的交易结果。
+            :raises ValueError: 日期不符或当天已有交易结果，禁止覆盖。
+            """
             if self.completed is not None or result['date'] != self.day:
                 raise ValueError('不能覆盖已完成结果或保存其他日期的结果')
             payload = json.dumps(result, ensure_ascii=False, default=str, allow_nan=False)
@@ -202,7 +236,13 @@ class PapAccountRepository:
 
     @staticmethod
     def find_latest_valuation_on_or_before(directory, instance_id, day):
-        """只读查询最近成功估值；账户或估值不存在时返回 None。"""
+        """只读查询截止日期之前最近一次成功估值，包含截止当天。
+
+        :param directory: 所有账户的数据根目录。
+        :param instance_id: 账户 ID。
+        :param day: 截止日期，格式 YYYY-MM-DD。
+        :return: 成功估值字典；无记录返回 None。
+        """
         if not re.fullmatch(r'[A-Za-z0-9_-]+', instance_id):
             raise ValueError('实例ID只能包含字母、数字、下划线及连字符')
         database = directory / instance_id / 'ledger.sqlite3'
@@ -217,7 +257,11 @@ class PapAccountRepository:
         return json.loads(row[0]) if row else None
 
     def save_daily_valuation(self, snapshot):
-        """更新当天收盘估值及收益，保留同一行的原始交易结果。"""
+        """保存收盘估值并标记 success，保留当天交易结果。
+
+        :param snapshot: 估值字典，date 为 YYYY-MM-DD。
+        :return: 传入的估值字典。
+        """
         payload = json.dumps(snapshot, ensure_ascii=False, allow_nan=False)
         with closing(sqlite3.connect(self.database, timeout=30)) as connection, connection:
             connection.execute("""INSERT INTO daily_results(day, valuation_payload, valuation_status, updated_at)
@@ -228,7 +272,12 @@ class PapAccountRepository:
         return snapshot
 
     def mark_valuation_status(self, day, status, error=''):
-        """记录估值执行中或失败状态，不修改交易结果，不将旧估值当作成功结果。"""
+        """更新估值状态和错误提示，保留交易及已有估值数据。
+
+        :param day: 估值日期，格式 YYYY-MM-DD。
+        :param status: pending、running 或 failed；成功由 save_daily_valuation 设置。
+        :param error: 失败提示，默认清空。
+        """
         with closing(sqlite3.connect(self.database, timeout=30)) as connection, connection:
             connection.execute("""INSERT INTO daily_results(day, valuation_status, valuation_error, updated_at)
                 VALUES (?, ?, ?, ?) ON CONFLICT(day) DO UPDATE SET valuation_status=excluded.valuation_status,
@@ -237,7 +286,13 @@ class PapAccountRepository:
 
     @staticmethod
     def get_daily_result(directory, instance_id, day):
-        """只读查询当天交易与估值状态；无账户或当天无记录时返回 None。"""
+        """只读查询指定日期的交易、估值及执行状态。
+
+        :param directory: 所有账户的数据根目录。
+        :param instance_id: 账户 ID。
+        :param day: 查询日期，格式 YYYY-MM-DD。
+        :return: 含 execution、valuation、valuation_status、valuation_error 的字典；无记录返回 None。
+        """
         if not re.fullmatch(r'[A-Za-z0-9_-]+', instance_id):
             raise ValueError('实例ID只能包含字母、数字、下划线及连字符')
         database = directory / instance_id / 'ledger.sqlite3'
@@ -255,12 +310,16 @@ class PapAccountRepository:
                 'valuation_status': row['valuation_status'], 'valuation_error': row['valuation_error']}
 
     def _insert_account(self, connection, initial_cash):
+        """在当前事务中写入开户资金、策略归属及 UTC 创建时间。"""
         connection.execute("""INSERT INTO account(id, initial_cash, instance_id, strategy_id, created_at)
             VALUES (1, ?, ?, ?, ?)""", (str(initial_cash), self.instance_id, self.strategy_id,
                                                 datetime.now(timezone.utc).isoformat()))
 
     @staticmethod
     def _execution_source(connection):
-        """只读接口兼容尚未由写入入口迁移的旧账本。"""
+        """选择新旧账本的交易表和字段，兼容尚未迁移的数据库。
+
+        :return: (表名, 交易结果字段名)。
+        """
         migrated = connection.execute("SELECT 1 FROM sqlite_master WHERE name='daily_results'").fetchone()
         return ('daily_results', 'execution_payload') if migrated else ('runs', 'payload')

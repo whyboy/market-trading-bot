@@ -22,6 +22,11 @@ class TradeExecutionReport:
 
     @staticmethod
     def build(task):
+        """生成策略执行结果消息，无成交也生成；失败时仅显示失败提示。
+
+        :param task: 已完成的交易任务，包含执行结果及账户仓库。
+        :return: (标题, 纯文本正文)，收益采用执行时估值。
+        """
         result = task.result
         title = f"{task.strategy_id}｜模拟交易{'完成' if result['success'] else '失败'}"
         lines = [f'账户：{task.instance_id}', f'计划时间：{task.scheduled_at.isoformat()}',
