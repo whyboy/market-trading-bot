@@ -1,15 +1,27 @@
-"""将每日估值汇总格式化为消息；不获取行情、不计算收益、不调度发送。"""
+"""每日收益总结消息。"""
 from decimal import Decimal
 
 
 class DailyAccountReport:
+    """消息示例（标题及正文）：
+
+    etf_rotation｜每日收益总结
+    日期：2026-11-20
+    账户：etf_rotation_pap
+    估值时间：2026-11-20T15:00:00+08:00
+    总资产：102,800.00 元
+    可用现金：12,350.00 元
+    比较基准：2026-11-19
+    当日盈亏：+800.00 元
+    当日收益率：+0.78%
+    累计盈亏：+2,800.00 元
+    累计收益率：+2.80%
+    持仓：510300.XSHG × 20000 份
+    今日交易：买入 1 笔，卖出 0 笔
+    """
+
     @staticmethod
     def build(strategy_id, instance_id, summary):
-        """summary 提供资产、现金、累计收益、持仓和估值时间。
-
-        交易日另提供比较基准日期、当日盈亏及收益率、买卖笔数。
-        收益数据由收盘估值流程提供，本类仅格式化；休市日不展示旧的当日收益。
-        """
         title = f'{strategy_id}｜每日收益总结'
         lines = [f"日期：{summary['date']}", f'账户：{instance_id}']
         if not summary['is_trading_day']:
