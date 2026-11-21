@@ -5,71 +5,23 @@ import sqlite3
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from datetime import datetime, timedelta
-from decimal import Decimal
-from market_trading_bot.models import RankedETF, StrategyResult
-from market_trading_bot.PapAccountStore import PapAccountStore
-from market_trading_bot.PapExecutor import PapExecutor
-from market_trading_bot.runtime.TradingTask import TradingTask
+from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
+from market_trading_bot.task.TradingTask import TradingTask
+from PapFixture import PapFixture
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
-from zoneinfo import ZoneInfo
 
 
-class PapTests(unittest.TestCase):
-    def setUp(self):
-        self.temporary = TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
-        self.rules = {'A': {'lot_size': 100, 't_plus_one': True},
-                      'B': {'lot_size': 100, 't_plus_one': False}}
-        self.executor = PapExecutor({'commission_rate': .0002, 'minimum_commission': 5,
-                                       'slippage_rate': 0}, self.rules)
-        self.account_store = PapAccountStore(self.root, 'pap')
-
-    def signal(self, day=20, winner='A', weight=1, prices=(10, 20)):
-        now = datetime(2026, 11, day, 14, 30, tzinfo=ZoneInfo('Asia/Shanghai'))
-        ranking = tuple(RankedETF(symbol, 1, .2, price, now, now.date() - timedelta(days=30),
-                                  now.date() - timedelta(days=1)) for symbol, price in zip(self.rules, prices))
-        return StrategyResult(now, ranking, {symbol: weight if symbol == winner else 0 for symbol in self.rules})
-
-    def test_commission_lot_size_and_conservation(self):
-        result = self.account_store.rebalance(self.signal(), self.executor, 10000)
-        self.assertEqual(result['positions']['A'], {'quantity': 900, 'sellable': 0})
-        self.assertEqual(result['cash'], '995.00')
-        self.assertEqual(Decimal(result['cash']) + 900 * Decimal('10'), Decimal('10000') - Decimal('5'))
-        self.assertEqual(result['orders'][0]['status'], 'partial')
-        self.assertEqual(result['orders'][0]['reason'], 'cash_limit')
-
+class PapAccountRepositoryTests(PapFixture, unittest.TestCase):
     def test_restore_sell_before_buy_and_t_plus_zero(self):
         self.account_store.rebalance(self.signal(), self.executor, 10000)
-        restored = PapAccountStore(self.root, 'pap')
+        restored = PapAccountRepository(self.root, 'pap')
         result = restored.rebalance(self.signal(day=23, winner='B'), self.executor, 999999)
         self.assertEqual([fill['side'] for fill in result['fills']], ['sell', 'buy'])
         self.assertNotIn('A', result['positions'])
         self.assertEqual(result['positions']['B'], {'quantity': 400, 'sellable': 400})
         self.assertEqual(result['cash'], '1985.00')
         self.assertEqual(result['equity'], '9985.00')
-
-    def test_proportional_commission_and_sell_slippage(self):
-        self.executor.rate = Decimal('.01')
-        first = self.account_store.rebalance(self.signal(), self.executor, 10000)
-        self.assertEqual(first['fills'][0]['commission'], '90.00')
-        self.executor.slippage = Decimal('.01')
-        second = self.account_store.rebalance(self.signal(day=23, weight=0), self.executor, 10000)
-        self.assertEqual(second['fills'][0]['price'], '9.900')
-        self.assertEqual(second['fills'][0]['commission'], '89.10')
-        self.assertEqual(second['cash'], '9730.90')
-
-    def test_same_symbol_is_rebalanced_and_zero_target_liquidates(self):
-        self.account_store.rebalance(self.signal(), self.executor, 10000)
-        result = self.account_store.rebalance(self.signal(day=23, weight=.5), self.executor, 10000)
-        self.assertEqual(result['positions']['A']['quantity'], 400)
-        self.assertEqual(result['fills'][0]['quantity'], 500)
-        result = self.account_store.rebalance(self.signal(day=24, weight=0), self.executor, 10000)
-        self.assertEqual(result['positions'], {})
-        self.assertEqual(result['cash'], '9985.00')
 
     def test_concurrent_retry_does_not_duplicate_fills(self):
         with ThreadPoolExecutor(max_workers=4) as pool:
@@ -102,7 +54,7 @@ class PapTests(unittest.TestCase):
         self.account_store.export_csv()
         with (self.account_store.directory / 'account_trades.csv').open(encoding='utf-8-sig') as stream:
             self.assertEqual(next(csv.DictReader(stream))['buy_quantity'], '900')
-        self.assertIsNone(PapAccountStore(self.root, 'other').completed('2026-11-20'))
+        self.assertIsNone(PapAccountRepository(self.root, 'other').completed('2026-11-20'))
 
     def read_trades(self):
         with (self.account_store.directory / 'account_trades.csv').open(encoding='utf-8-sig') as stream:
@@ -140,7 +92,7 @@ class PapTests(unittest.TestCase):
         self.account_store.export_csv()
         with sqlite3.connect(self.account_store.database) as connection:
             self.assertEqual(connection.execute('SELECT initial_cash FROM account').fetchone()[0], '10000.00')
-        with patch.object(PapAccountStore, '_restore_initial_cash', side_effect=AssertionError('不应再次反推')):
+        with patch.object(PapAccountRepository, '_restore_initial_cash', side_effect=AssertionError('不应再次反推')):
             self.account_store.export_csv()
 
     def test_summary_includes_rotation_and_liquidation(self):
@@ -186,28 +138,6 @@ class PapTests(unittest.TestCase):
         self.account_store.export_csv()
         self.assertEqual(len(self.read_trades()), 2)
 
-    def test_exact_cash_includes_rounded_commission(self):
-        result = self.account_store.rebalance(self.signal(prices=(10.001, 20)), self.executor, 30009)
-        self.assertEqual(result['fills'][0]['quantity'], 3000)
-        self.assertEqual(result['cash'], '0.00')
-
-    def test_insufficient_cash_and_slippage(self):
-        result = self.account_store.rebalance(self.signal(), self.executor, 1000)
-        self.assertEqual(result['fills'], [])
-        self.assertEqual(result['cash'], '1000.00')
-        self.executor.slippage = Decimal('.01')
-        result = self.executor.rebalance(self.signal(), {'date': None, 'cash': '10000', 'positions': {}})
-        self.assertEqual(result['fills'][0]['price'], '10.100')
-        self.assertEqual(result['cash'], '905.00')
-
-    def test_missing_held_symbol_and_backdated_run_are_rejected(self):
-        self.account_store.rebalance(self.signal(day=23), self.executor, 10000)
-        with self.assertRaises(ValueError):
-            self.account_store.rebalance(self.signal(), self.executor, 10000)
-        account = {'date': '2026-11-19', 'cash': '1000', 'positions': {'C': {'quantity': 100, 'sellable': 100}}}
-        with self.assertRaises(ValueError):
-            self.executor.rebalance(self.signal(), account)
-
     def test_task_retries_without_market_and_recovers_csv(self):
         (self.root / 'config').mkdir()
         global_config = {'timezone': 'Asia/Shanghai', 'market': {}, 'storage': {'data_dir': 'data'}, 'logging': {}}
@@ -217,17 +147,17 @@ class PapTests(unittest.TestCase):
         (self.root / 'config/global.json').write_text(json.dumps(global_config))
         path = self.root / 'config/strategy.json'
         path.write_text(json.dumps(config))
-        with patch('market_trading_bot.runtime.TradingTask.strategy_logging'), \
-                patch('market_trading_bot.runtime.TradingTask.datetime') as clock, \
-                patch('market_trading_bot.runtime.TradingTask.ETFRotationStrategyImpl') as strategy, \
-                patch('market_trading_bot.runtime.TradingTask.AKShareMarket') as market:
+        with patch('market_trading_bot.task.TradingTask.strategy_logging'), \
+                patch('market_trading_bot.task.TradingTask.datetime') as clock, \
+                patch('market_trading_bot.task.TradingTask.ETFRotationStrategyImpl') as strategy, \
+                patch('market_trading_bot.task.TradingTask.AKShareMarket') as market:
             clock.now.return_value = self.signal().as_of
             strategy.return_value.calculate.return_value = self.signal()
             market.return_value.load.return_value = self.signal().as_of, {}
-            with patch.object(PapAccountStore, 'export_csv', side_effect=OSError('disk full')):
+            with patch.object(PapAccountRepository, 'export_csv', side_effect=OSError('disk full')):
                 first = TradingTask(self.root, path).run_pap('pap')
             self.assertFalse(first['csv_exported'])
-            with patch.object(PapAccountStore, 'export_csv', side_effect=sqlite3.OperationalError('database is locked')):
+            with patch.object(PapAccountRepository, 'export_csv', side_effect=sqlite3.OperationalError('database is locked')):
                 self.assertFalse(TradingTask(self.root, path).run_pap('pap')['csv_exported'])
             market.reset_mock()
             second = TradingTask(self.root, path).run_pap('pap')
@@ -236,9 +166,5 @@ class PapTests(unittest.TestCase):
             self.assertEqual(first['fills'], second['fills'])
         config['instances'][0]['mode'] = 'pro'
         path.write_text(json.dumps(config))
-        with patch('market_trading_bot.runtime.TradingTask.strategy_logging'), self.assertRaises(ValueError):
+        with patch('market_trading_bot.task.TradingTask.strategy_logging'), self.assertRaises(ValueError):
             TradingTask(self.root, path).run_pap('pap')
-
-
-if __name__ == '__main__':
-    unittest.main()

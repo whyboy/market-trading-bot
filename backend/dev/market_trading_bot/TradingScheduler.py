@@ -3,10 +3,10 @@ import fcntl
 import json
 import logging
 import threading
-from .TradingTask import TradingTask
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime, time, timezone
-from market_trading_bot.AKShareMarket import AKShareMarket, SHANGHAI
+from market_trading_bot.market.AKShareMarket import AKShareMarket, SHANGHAI
+from market_trading_bot.task.TradingTask import TradingTask
 from pathlib import Path
 
 

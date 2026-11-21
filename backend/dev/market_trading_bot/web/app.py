@@ -1,17 +1,17 @@
 """只读监控 API 与构建后的前端页面。"""
 import json
 import re
-import sqlite3
 from asyncio import to_thread
-from contextlib import asynccontextmanager, closing
+from contextlib import asynccontextmanager
 from datetime import date
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from market_trading_bot.runtime.TradingScheduler import TradingScheduler
+from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
+from market_trading_bot.TradingScheduler import TradingScheduler
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 @asynccontextmanager
@@ -70,18 +70,7 @@ def account(instance_id: str):
         raise HTTPException(404, '账户不存在')
     if not any(instance['id'] == instance_id for item in strategies() for instance in item.get('instances', [])):
         raise HTTPException(404, '账户不存在')
-    database = (ROOT / settings()['storage']['data_dir'] / instance_id / 'ledger.sqlite3').resolve()
-    if not database.exists():
-        return {'initialized': False}
-    with closing(sqlite3.connect(f'{database.as_uri()}?mode=ro', uri=True)) as connection:
-        row = connection.execute('SELECT payload FROM runs ORDER BY day DESC LIMIT 1').fetchone()
-        if row is None:
-            return {'initialized': False}
-        latest = json.loads(row[0])
-        initial = connection.execute('SELECT initial_cash FROM account WHERE id=1').fetchone()
-    return {'initialized': True, 'date': latest['date'], 'as_of': latest.get('signal', {}).get('as_of'),
-            'cash': latest['cash'], 'equity': latest['equity'], 'positions': latest['positions'],
-            'initial_cash': initial[0] if initial else None}
+    return PapAccountRepository.latest(ROOT / settings()['storage']['data_dir'], instance_id)
 
 
 def log_directory(strategy_id):
@@ -113,7 +102,7 @@ def log_content(strategy_id: str, day: date, offset: int = Query(0, ge=0)):
     return {'content': content.decode('utf-8', errors='replace'), 'next_offset': next_offset, 'has_more': has_more}
 
 
-DIST = ROOT.parent / 'frontend/dist'
+DIST = ROOT.parents[1] / 'frontend/dist'
 if (DIST / 'assets').exists():
     app.mount('/assets', StaticFiles(directory=DIST / 'assets'), name='assets')
 

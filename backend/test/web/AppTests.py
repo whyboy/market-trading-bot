@@ -7,14 +7,13 @@ import unittest
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
-from market_trading_bot.runtime.TradingScheduler import TradingScheduler
-from market_trading_bot.runtime.TradingTask import TradingTask
+from market_trading_bot.TradingScheduler import TradingScheduler
 from market_trading_bot.web import app as web
 from pathlib import Path
 from unittest.mock import patch
 
 
-class MonitorTests(unittest.TestCase):
+class AppTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
@@ -112,7 +111,7 @@ class MonitorTests(unittest.TestCase):
             entered.set()
             release.wait(3)
 
-        with patch('market_trading_bot.runtime.TradingTask.TradingTask.run_pap', side_effect=trade):
+        with patch('market_trading_bot.task.TradingTask.TradingTask.run_pap', side_effect=trade):
             with TestClient(web.app) as client:
                 scheduler = web.app.state.scheduler
                 scheduler.calendar_day = scheduler.now().date()
@@ -159,7 +158,7 @@ class MonitorTests(unittest.TestCase):
             else:
                 finished.set()
 
-        with patch('market_trading_bot.runtime.TradingTask.TradingTask.run_pap', side_effect=trade):
+        with patch('market_trading_bot.task.TradingTask.TradingTask.run_pap', side_effect=trade):
             with TestClient(web.app):
                 scheduler = web.app.state.scheduler
                 scheduler.calendar_day = scheduler.now().date()

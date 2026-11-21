@@ -4,15 +4,15 @@ import json
 import os
 import re
 import sqlite3
-from .models import StrategyResult
-from .PapExecutor import PapExecutor
 from contextlib import closing
 from dataclasses import asdict
 from decimal import Decimal
+from market_trading_bot.execution.PapExecutor import PapExecutor
+from market_trading_bot.models import StrategyResult
 from pathlib import Path
 
 
-class PapAccountStore:
+class PapAccountRepository:
     """按实例保存完整调仓快照，同日唯一约束防止并发及重跑重复成交。"""
 
     def __init__(self, directory: Path, instance_id: str):
@@ -27,6 +27,24 @@ class PapAccountStore:
             connection.execute('''CREATE TABLE IF NOT EXISTS account (
                                   id INTEGER PRIMARY KEY CHECK (id = 1),
                                   initial_cash TEXT NOT NULL)''')
+
+    @staticmethod
+    def latest(directory: Path, instance_id: str) -> dict:
+        """只读查询最近账户快照；没有账本时不创建目录或账户。"""
+        if not re.fullmatch(r'[A-Za-z0-9_-]+', instance_id):
+            raise ValueError('实例ID只能包含字母、数字、下划线及连字符')
+        database = (directory / instance_id / 'ledger.sqlite3').resolve()
+        if not database.exists():
+            return {'initialized': False}
+        with closing(sqlite3.connect(f'{database.as_uri()}?mode=ro', uri=True)) as connection:
+            row = connection.execute('SELECT payload FROM runs ORDER BY day DESC LIMIT 1').fetchone()
+            if row is None:
+                return {'initialized': False}
+            latest = json.loads(row[0])
+            initial = connection.execute('SELECT initial_cash FROM account WHERE id=1').fetchone()
+        return {'initialized': True, 'date': latest['date'], 'as_of': latest.get('signal', {}).get('as_of'),
+                'cash': latest['cash'], 'equity': latest['equity'], 'positions': latest['positions'],
+                'initial_cash': initial[0] if initial else None}
 
     def completed(self, day: str) -> dict | None:
         """读取指定日期已提交的结果；未运行返回 None。"""

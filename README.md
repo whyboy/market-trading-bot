@@ -16,22 +16,34 @@ ETF 动量轮动程序，启动后按交易日定时模拟调仓，并提供网�
 
 ```text
 market-trading-bot/
-├── frontend/                       # Vue监控页面，开发端口8000
+├── frontend/                              # 前端，开发端口8000
 ├── backend/
-│   ├── main.py                     # 后端启动入口，默认端口8001
-│   ├── requirements.txt            # Python依赖
-│   ├── config/                     # 全局与策略配置
-│   ├── src/market_trading_bot/
-│   │   ├── runtime/                # 调度、策略任务和运行状态
-│   │   ├── web/                    # 网页与只读API
-│   │   ├── strategies/             # 策略实现
-│   │   ├── AKShareMarket.py        # 行情与交易日历
-│   │   ├── PapExecutor.py          # 模拟成交
-│   │   ├── PapAccountStore.py      # 账户账本与CSV导出
-│   │   ├── StrategyLogger.py       # 策略日志
-│   │   └── models.py              # 数据结构
-│   ├── tests/                      # 离线测试
-│   └── data/                       # 账户账本与运行记录
+│   ├── main.py                            # 后端启动入口，默认端口8001
+│   ├── requirements.txt
+│   ├── dev/                               # 后端源码和运行资源，生产环境同样使用
+│   │   ├── config/                        # 全局与策略配置
+│   │   ├── data/                          # 账本、任务状态、CSV
+│   │   ├── logs/                          # 运行日志，启动后生成
+│   │   └── market_trading_bot/
+│   │       ├── TradingScheduler.py        # 交易日判断与任务调度
+│   │       ├── models.py
+│   │       ├── task/TradingTask.py         # 单次策略执行及状态更新
+│   │       ├── strategy/                  # 策略实现
+│   │       │   └── ETFRotationStrategyImpl.py
+│   │       ├── repository/                # 数据库访问
+│   │       │   ├── TaskStatusRepository.py
+│   │       │   └── PapAccountRepository.py
+│   │       ├── log/StrategyLogger.py      # 日志处理代码
+│   │       ├── market/AKShareMarket.py
+│   │       ├── execution/PapExecutor.py
+│   │       └── web/app.py
+│   └── test/                              # 核心测试，不与源码包同名
+│       ├── TradingSchedulerTests.py
+│       ├── strategy/ETFRotationStrategyImplTests.py
+│       ├── market/AKShareMarketTests.py
+│       ├── repository/PapAccountRepositoryTests.py
+│       ├── execution/PapExecutorTests.py
+│       └── web/AppTests.py
 ├── AGENTS.md
 └── README.md
 ```
@@ -51,13 +63,13 @@ backend/.venv/bin/python -m pip install -r backend/requirements.txt
 backend/.venv/bin/python backend/main.py
 ```
 
-可通过 `--host`、`--port` 调整监听地址与端口。策略配置从 `backend/config/*_strategy.json` 加载，修改后重启生效。
+可通过 `--host`、`--port` 调整监听地址与端口。策略配置从 `backend/dev/config/*_strategy.json` 加载，修改后重启生效。
 
-从旧版目录升级时，先停止服务，再将原 `data/`、`logs/` 内容迁入 `backend/data/`、`backend/logs/`，保留账本与历史日志。
+从旧版目录升级时，先停止服务，将原 `backend/data/`、`backend/logs/` 内容迁入 `backend/dev/data/`、`backend/dev/logs/`，保留账本与历史日志。配置位于 `backend/dev/config/`；这些路径不依赖启动时的工作目录。
 
 ## 配置
 
-全局配置位于 `backend/config/global.json`：
+全局配置位于 `backend/dev/config/global.json`：
 
 | 配置 | 用途 |
 |---|---|
@@ -67,7 +79,7 @@ backend/.venv/bin/python backend/main.py
 | `runtime.trade_timeout_seconds` | 交易执行超时阈值，默认 300 秒，仅标记异常 |
 | `pushplus` | 预留配置，当前不发送推送 |
 
-策略配置位于 `backend/config/etf_rotation_strategy.json`：
+策略配置位于 `backend/dev/config/etf_rotation_strategy.json`：
 
 | 配置 | 默认值 | 用途 |
 |---|---|---|
@@ -88,7 +100,7 @@ backend/.venv/bin/python backend/main.py
 
 ## 账户数据
 
-每个实例的数据保存在 `backend/data/<instance_id>/`：
+每个实例的数据保存在 `backend/dev/data/<instance_id>/`：
 
 - `ledger.sqlite3`：权威账本，保存全部运行结果、账户状态、信号、订单和成交。
 - `account_trades.csv`：可重建的查看副本，仅记录发生实际成交的日期。
@@ -116,7 +128,7 @@ backend/.venv/bin/python backend/main.py
 
 ## 日志
 
-日志写入 `backend/logs/<strategy>/YYYY-MM-DD.log`，默认保留最近 30 个有日志的日期。日志包含运行状态、行情区间、报价、策略排名、目标权重和模拟成交摘要，不记录 Token。
+日志写入 `backend/dev/logs/<strategy>/YYYY-MM-DD.log`，默认保留最近 30 个有日志的日期。日志包含运行状态、行情区间、报价、策略排名、目标权重和模拟成交摘要，不记录 Token。
 
 ## 定时执行规则
 
@@ -125,7 +137,7 @@ backend/.venv/bin/python backend/main.py
 - 9:00 后启动服务会立即补做当天的交易日判断，只安排尚未到时间的策略，不补执行已错过的任务。
 - `enable` 默认为 `true`，设为 `false` 不安排该策略。到点创建一次性的 `TradingTask` 线程，只执行策略和更新自身状态，完成后退出。
 - 同一策略的账户串行执行，不同策略互不阻塞。任务不负责交易日判断或每日调度，账户账本继续防止同日重复成交。
-- 任务状态存储在 `backend/data/runtime/<strategy>/runtime.sqlite3`，页面显示当日计划执行时间、最近执行结果和交易日判断状态。配置修改后重启生效。
+- 任务状态存储在 `backend/dev/data/runtime/<strategy>/runtime.sqlite3`，页面显示当日计划执行时间、最近执行结果和交易日判断状态。配置修改后重启生效。
 
 ## 网页运行监控
 
@@ -178,6 +190,6 @@ npm run dev --prefix frontend -- --port 8000 --strictPort
 ## 验证
 
 ```bash
-PYTHONPATH=backend/src backend/.venv/bin/python -m unittest discover -s backend/tests
+PYTHONPATH=backend/dev backend/.venv/bin/python -m unittest discover -s backend/test -p '*Tests.py'
 npm run build --prefix frontend
 ```

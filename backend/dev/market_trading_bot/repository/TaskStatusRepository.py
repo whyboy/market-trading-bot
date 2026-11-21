@@ -5,7 +5,7 @@ from contextlib import closing
 from pathlib import Path
 
 
-class RuntimeStore:
+class TaskStatusRepository:
     def __init__(self, root: Path, strategy_id: str):
         settings = json.loads((root / 'config/global.json').read_text())
         self.database = root / settings['storage']['data_dir'] / 'runtime' / strategy_id / 'runtime.sqlite3'

@@ -4,13 +4,13 @@ import os
 import sqlite3
 import threading
 import uuid
-from .RuntimeStore import RuntimeStore
 from datetime import datetime, time
-from market_trading_bot.AKShareMarket import AKShareMarket, SHANGHAI
-from market_trading_bot.PapAccountStore import PapAccountStore
-from market_trading_bot.PapExecutor import PapExecutor
-from market_trading_bot.strategies.ETFRotationStrategyImpl import ETFRotationStrategyImpl
-from market_trading_bot.StrategyLogger import strategy_logging
+from market_trading_bot.execution.PapExecutor import PapExecutor
+from market_trading_bot.log.StrategyLogger import strategy_logging
+from market_trading_bot.market.AKShareMarket import AKShareMarket, SHANGHAI
+from market_trading_bot.repository.PapAccountRepository import PapAccountRepository
+from market_trading_bot.repository.TaskStatusRepository import TaskStatusRepository
+from market_trading_bot.strategy.ETFRotationStrategyImpl import ETFRotationStrategyImpl
 from pathlib import Path
 
 
@@ -21,7 +21,7 @@ class TradingTask:
         self.config = json.loads(strategy_path.read_text())
         self.strategy_id = self.config['strategy']
         self.settings = json.loads((root / 'config/global.json').read_text())
-        self.store = RuntimeStore(root, self.strategy_id)
+        self.status_repository = TaskStatusRepository(root, self.strategy_id)
         self.stop_event = threading.Event()
         self.thread = threading.Thread(target=self._run, name=f'trading-task-{self.strategy_id}', daemon=True)
         self.results = {}
@@ -44,7 +44,7 @@ class TradingTask:
 
     def _heartbeat(self):
         self.status['heartbeat_at'] = self.now().isoformat()
-        self.store.write(self.status)
+        self.status_repository.write(self.status)
 
     def _run(self):
         try:
@@ -97,11 +97,11 @@ class TradingTask:
                     raise ValueError('必须指定唯一、启用的pap实例')
                 instance = matches[0]
                 executor = PapExecutor(instance['execution'], configuration['instruments'])
-                account_store = PapAccountStore(root / settings['storage']['data_dir'], instance_id)
-                completed = account_store.completed(datetime.now(SHANGHAI).date().isoformat())
+                account_repository = PapAccountRepository(root / settings['storage']['data_dir'], instance_id)
+                completed = account_repository.completed(datetime.now(SHANGHAI).date().isoformat())
                 if completed:
                     logger.info('跳过重复调仓 instance=%s date=%s', instance_id, completed['date'])
-                    return self._pap_output(account_store, completed, logger)
+                    return self._pap_output(account_repository, completed, logger)
                 strategy = ETFRotationStrategyImpl(configuration['parameters'])
                 market = AKShareMarket(settings['market'], logger=logger)
                 as_of, snapshots = market.load(strategy.symbols, strategy.history_points)
@@ -111,20 +111,20 @@ class TradingTask:
                     logger.info('策略排名 rank=%d symbol=%s score=%.8f annual_volatility=%.8f target_weight=%.6f',
                                 rank, item.symbol, item.score, item.annual_volatility, result.target_weights[item.symbol])
                 logger.info('策略计算成功 target_weights=%s', result.target_weights)
-                committed = account_store.rebalance(result, executor, instance['initial_cash'])
+                committed = account_repository.rebalance(result, executor, instance['initial_cash'])
                 logger.info('模拟记账成功 instance=%s date=%s fills=%d cash=%s',
                             instance_id, committed['date'], len(committed['fills']), committed['cash'])
-                return self._pap_output(account_store, committed, logger)
+                return self._pap_output(account_repository, committed, logger)
             except Exception:
                 logger.exception('运行失败 operation=%s；模拟提交状态以账本为准', operation)
                 raise
 
     @staticmethod
-    def _pap_output(account_store: PapAccountStore, result: dict, logger) -> dict:
+    def _pap_output(account_repository: PapAccountRepository, result: dict, logger) -> dict:
         """导出查看副本；导出失败仍返回已提交结果，重跑可补齐 CSV。"""
-        output = {'operation': 'pap_rebalance', 'instance_id': account_store.directory.name, **result}
+        output = {'operation': 'pap_rebalance', 'instance_id': account_repository.directory.name, **result}
         try:
-            account_store.export_csv()
+            account_repository.export_csv()
             output['csv_exported'] = True
         except (OSError, sqlite3.Error):
             logger.exception('CSV导出失败；模拟账本已提交，重跑可恢复导出')
