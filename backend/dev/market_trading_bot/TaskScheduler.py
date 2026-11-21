@@ -25,17 +25,18 @@ class TaskScheduler:
         self.root = root
         self.tasks = {}  # (策略ID, 账户ID) -> 最近一次任务（可能已完成）
         self.configs = {}
-        self.calendar_day = None
-        self.calendar_prepared_date = None
-        self.is_trading_day = None
         self.calendar_error = None
         self.calendar_lock = threading.RLock()
-        self.calendar = ()
-        self.calendar_loaded_day = None
         self.summary_task = None
         self.valuation_task = None
         self.valuation_day = None
         self.valuation_lock = threading.Lock()
+        # 已准备日历的结构（日期均为 date）：
+        # {
+        #     'day': today,
+        #     'is_trading_day': True,  # 或 False
+        #     'previous_trading_day': 上一个交易日,
+        # }
         self.calendar_context = None
         self.summary_lock = threading.Lock()
         self.reported_day = None
@@ -96,7 +97,7 @@ class TaskScheduler:
             return
         try:
             today = self.now().date()
-            if self.calendar_prepared_date == today:
+            if self.calendar_context is not None and self.calendar_context['day'] == today:
                 return
             context = self._prepare_calendar(today)
             if self.stop_event.is_set() or self.now().date() != today:
@@ -104,10 +105,7 @@ class TaskScheduler:
             if context is None:
                 return
             self.calendar_context = context
-            self.calendar_day = today
-            self.is_trading_day = context['is_trading_day']
-            self.calendar_prepared_date = today
-            if not self.is_trading_day:
+            if not context['is_trading_day']:
                 logging.getLogger(__name__).info('%s 非交易日，跳过交易、估值和日报', today)
         finally:
             self.calendar_lock.release()
@@ -198,17 +196,13 @@ class TaskScheduler:
         return context
 
     def _load_calendar(self, day, market):
-        """缓存交易日历，返回当天是否交易及上一交易日。"""
-        with self.calendar_lock:
-            if self.calendar_loaded_day != day:
-                calendar = market.trading_calendar()
-                if not calendar or not calendar[0] < day <= calendar[-1]:
-                    raise ValueError('交易日历未覆盖当前日期及上一交易日')
-                self.calendar = tuple(calendar)
-                self.calendar_loaded_day = day
-            self.calendar_error = None
-            return {'day': day, 'is_trading_day': day in self.calendar,
-                    'previous_trading_day': max(value for value in self.calendar if value < day)}
+        """读取交易日历，返回当天是否交易及上一交易日。"""
+        calendar = market.trading_calendar()
+        if not calendar or not calendar[0] < day <= calendar[-1]:
+            raise ValueError('交易日历未覆盖当前日期及上一交易日')
+        self.calendar_error = None
+        return {'day': day, 'is_trading_day': day in calendar,
+                'previous_trading_day': max(value for value in calendar if value < day)}
 
     def _is_trading(self, strategy_id, instance_id):
         """判断指定策略账户的交易线程是否仍在运行。"""
@@ -294,6 +288,7 @@ class TaskScheduler:
         healthy = self.timer.running and (now - datetime.fromisoformat(self.heartbeat_at)).total_seconds() <= 20
         job = self.timer.get_job(strategy_id)
         config = self.configs.get(strategy_id, {})
+        context = self.calendar_context
         return {**status, 'strategy': strategy_id, 'state': 'running' if active_tasks else 'idle',
                 'online': healthy and not timed_out,
                 'health': 'trade_timeout' if timed_out else 'idle' if healthy else 'stopped',
@@ -302,8 +297,8 @@ class TaskScheduler:
                 'started_at': self.started_at,
                 'uptime_seconds': (now - datetime.fromisoformat(self.started_at)).total_seconds(),
                 'scheduler_enabled': strategy_id in self.configs, 'scheduler_error': self.calendar_error,
-                'calendar_day': self.calendar_day.isoformat() if self.calendar_day else None,
-                'is_trading_day': self.is_trading_day if self.calendar_day == self.now().date() else None,
+                'calendar_day': context['day'].isoformat() if context else None,
+                'is_trading_day': context['is_trading_day'] if context and context['day'] == self.now().date() else None,
                 'scheduled_tasks': [{'strategy': strategy_id, 'instance_id': instance['id'],
                                      'next_execution_at': job.next_run_time.isoformat() if job and job.next_run_time else None,
                                      'last_execution': task_map[(strategy_id, instance['id'])].result

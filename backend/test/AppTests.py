@@ -129,8 +129,8 @@ class AppTests(unittest.TestCase):
         with patch('market_trading_bot.task.TradingTask.TradingTask.trade', autospec=True, side_effect=trade):
             with TestClient(app_module.app) as client:
                 scheduler = app_module.app.state.scheduler
-                scheduler.calendar_day = scheduler.now().date()
-                scheduler.is_trading_day = True
+                scheduler.calendar_context = {'day': scheduler.now().date(), 'is_trading_day': True,
+                                              'previous_trading_day': scheduler.now().date() - timedelta(days=1)}
                 scheduler._start_trades('example', scheduler.now().date())
                 try:
                     self.assertTrue(entered.wait(2))
@@ -176,8 +176,8 @@ class AppTests(unittest.TestCase):
         with patch('market_trading_bot.task.TradingTask.TradingTask.trade', autospec=True, side_effect=trade):
             with TestClient(app_module.app):
                 scheduler = app_module.app.state.scheduler
-                scheduler.calendar_day = scheduler.now().date()
-                scheduler.is_trading_day = True
+                scheduler.calendar_context = {'day': scheduler.now().date(), 'is_trading_day': True,
+                                              'previous_trading_day': scheduler.now().date() - timedelta(days=1)}
                 scheduler._start_trades('example', scheduler.now().date())
                 try:
                     self.assertTrue(entered.wait(2))

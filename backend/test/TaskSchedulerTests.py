@@ -59,7 +59,7 @@ class TaskSchedulerTests(unittest.TestCase):
     def test_trading_day_uses_registered_daily_trade_job(self):
         self.prepare()
         self.calendar.assert_called_once()
-        self.assertTrue(self.scheduler.is_trading_day)
+        self.assertTrue(self.scheduler.calendar_context['is_trading_day'])
         self.assertEqual(self.scheduler.tasks, {})
         trigger = self.scheduler.timer.get_job('etf_rotation').trigger
         self.assertEqual(trigger.get_next_fire_time(None, self.current), DUE)
@@ -72,7 +72,7 @@ class TaskSchedulerTests(unittest.TestCase):
         with self.assertLogs('market_trading_bot.TaskScheduler', level='INFO') as logs:
             self.scheduler.prepare_calender_context()
         self.assertIn('非交易日', logs.output[0])
-        self.assertFalse(self.scheduler.is_trading_day)
+        self.assertFalse(self.scheduler.calendar_context['is_trading_day'])
         self.assertIsNotNone(self.scheduler.timer.get_job('_daily_valuation'))
         self.assertIsNotNone(self.scheduler.timer.get_job('_daily_report'))
         self.assertIsNotNone(self.scheduler.timer.get_job('etf_rotation'))
@@ -98,7 +98,7 @@ class TaskSchedulerTests(unittest.TestCase):
 
         with patch.object(self.scheduler.stop_event, 'wait', side_effect=wait):
             self.prepare()
-        self.assertTrue(self.scheduler.is_trading_day)
+        self.assertTrue(self.scheduler.calendar_context['is_trading_day'])
         self.assertIsNotNone(self.scheduler.timer.get_job('etf_rotation'))
         self.assertEqual(self.scheduler.tasks, {})
 
@@ -204,7 +204,7 @@ class TaskSchedulerTests(unittest.TestCase):
             with patch.object(scheduler.timer, 'start'), patch.object(scheduler.timer, 'add_job') as add_job:
                 scheduler.start()
             self.calendar.assert_called_once()
-            self.assertTrue(scheduler.is_trading_day)
+            self.assertTrue(scheduler.calendar_context['is_trading_day'])
             self.assertFalse(scheduler.tasks)
         finally:
             scheduler.stop()
@@ -216,7 +216,7 @@ class TaskSchedulerTests(unittest.TestCase):
             scheduler.start()
             scheduler.timer.pause()
             self.calendar.assert_called_once()
-            self.assertTrue(scheduler.is_trading_day)
+            self.assertTrue(scheduler.calendar_context['is_trading_day'])
             self.assertIsNotNone(scheduler.timer.get_job('etf_rotation'))
         finally:
             scheduler.stop()
@@ -230,7 +230,7 @@ class TaskSchedulerTests(unittest.TestCase):
                 scheduler.start()
             scheduler.timer.pause()
             wait.assert_called_once_with(5)
-            self.assertTrue(scheduler.is_trading_day)
+            self.assertTrue(scheduler.calendar_context['is_trading_day'])
             self.assertIsNotNone(scheduler.timer.get_job('etf_rotation'))
         finally:
             scheduler.stop()
@@ -308,7 +308,7 @@ class TaskSchedulerTests(unittest.TestCase):
             with patch.object(scheduler.timer, 'start'), patch.object(scheduler.timer, 'add_job') as add_job:
                 scheduler.start()
             self.assertTrue(any(call.kwargs.get('id') == '_startup_daily_tasks' for call in add_job.call_args_list))
-            self.assertTrue(scheduler.is_trading_day)
+            self.assertTrue(scheduler.calendar_context['is_trading_day'])
         finally:
             scheduler.stop()
 
