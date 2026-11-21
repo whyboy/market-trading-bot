@@ -85,76 +85,54 @@ class TradingScheduler:
         return datetime.now(SHANGHAI)
 
     def prepare_day(self):
-        """先确认交易日，仅在通过后为策略注册当天的执行回调。"""
+        """确认当天是否交易，并为各策略注册一次性定时回调，不在此处执行策略。
+
+        日历成功判断后当天不再重复请求；锁避免启动补判断与9:00回调同时加载。
+        休市时不创建任务；请求失败等待5秒重试，停止、跨日或到15:00时结束。
+        """
         if not self.configs or not self.calendar_guard.acquire(blocking=False):
             return
+        day = self.now().date()
         try:
-            day = self.now().date()
-            if not self.checkIsTradingDay():
+            if self.calendar_day == day:
                 return
-            for strategy_id, config in self.configs.items():
-                due = datetime.combine(day, time.fromisoformat(config['schedule']['trade_time']), SHANGHAI)
-                if due > self.now():
-                    self.jobs[strategy_id] = self.timer.add_job(
-                        self._start_task, 'date', run_date=due, args=[self.paths[strategy_id], day],
-                        id=strategy_id, replace_existing=True, misfire_grace_time=5)
+            market = AKShareMarket(self.settings['market'])
+            while not self.stop_event.is_set() and self.now().date() == day and self.now().time() < time(15):
+                try:
+                    calendar = market.trading_calendar()
+                    if not calendar or not calendar[0] <= day <= calendar[-1]:
+                        raise ValueError('交易日历未覆盖当前日期')
+                    if self.stop_event.is_set() or self.now().date() != day:
+                        return
+                    self.calendar_day = day
+                    self.is_trading_day = day in calendar
+                    self.calendar_error = None
+                    if self.is_trading_day:
+                        for strategy_id, config in self.configs.items():
+                            due = datetime.combine(day, time.fromisoformat(config['schedule']['trade_time']), SHANGHAI)
+                            if due > self.now():
+                                self.jobs[strategy_id] = self.timer.add_job(
+                                    self._start_task, 'date', run_date=due, args=[self.paths[strategy_id], day],
+                                    id=strategy_id, replace_existing=True, misfire_grace_time=5)
+                    return
+                except Exception as exc:
+                    self.calendar_error = str(exc)
+                    logging.getLogger(__name__).warning('交易日历加载失败，5秒后重试：%s', exc)
+                    if self.stop_event.wait(5):
+                        return
         finally:
             self.calendar_guard.release()
-
-    def checkIsTradingDay(self):
-        """返回今天是否为交易日；成功结果按日缓存，失败每5秒重试至收盘或停止。"""
-        day = self.now().date()
-        if self.stop_event.is_set():
-            return False
-        if self.calendar_day == day:
-            return bool(self.is_trading_day)
-        market = AKShareMarket(self.settings['market'])
-        while not self.stop_event.is_set() and self.now().date() == day and self.now().time() < time(15):
-            try:
-                calendar = market.trading_calendar()
-                if not calendar or not calendar[0] <= day <= calendar[-1]:
-                    raise ValueError('交易日历未覆盖当前日期')
-                if self.stop_event.is_set() or self.now().date() != day:
-                    return False
-                self.calendar_day = day
-                self.is_trading_day = day in calendar
-                self.calendar_error = None
-                return self.is_trading_day
-            except Exception as exc:
-                self.calendar_error = str(exc)
-                logging.getLogger(__name__).warning('交易日历加载失败，5秒后重试：%s', exc)
-                if self.stop_event.wait(5):
-                    return False
-        return False
 
     def _heartbeat(self):
         """更新调度服务心跳；策略执行期间的任务心跳由TradingTask自行维护。"""
         self.heartbeat_at = datetime.now(timezone.utc).isoformat()
 
-    def _build_task(self, strategy_id, instance, scheduled_at):
-        """集中装配依赖；每个策略账户使用独立对象，Task只负责协调执行。"""
-        config = self.configs[strategy_id]
-        if instance['mode'] != 'pap' or config['strategy'] != 'etf_rotation':
-            raise ValueError('当前仅支持ETF轮动模拟账户')
-        return TradingTask(
-            strategy=ETFRotationStrategyImpl(config['parameters']),
-            market=AKShareMarket(self.settings['market']),
-            executor=PapTrader(instance['execution'], config['instruments']),
-            account_repository=PapAccountRepository(self.root / self.settings['storage']['data_dir'], instance['id']),
-            status_repository=TaskStatusRepository(self.root, strategy_id, instance['id']),
-            strategy_id=strategy_id, instance_id=instance['id'], initial_cash=instance['initial_cash'],
-            scheduled_at=scheduled_at,
-            trade_timeout_seconds=self.settings.get('runtime', {}).get('trade_timeout_seconds', 300),
-            log_context=strategy_logging(self.root, strategy_id, self.settings['logging']))
-
     def _start_task(self, path, day=None):
         """到点为每个启用账户创建Task；一个账户运行或装配失败不影响其他账户。"""
         with self.guard:
-            if self.stop_event.is_set() or self.calendar_day != self.now().date():
+            if self.stop_event.is_set() or not self.is_trading_day or self.calendar_day != self.now().date():
                 return
             if day is not None and day != self.now().date():
-                return
-            if not self.checkIsTradingDay():
                 return
             strategy_id = json.loads(path.read_text())['strategy']
             config = self.configs[strategy_id]
@@ -174,6 +152,22 @@ class TradingScheduler:
                     self.tasks[key] = task
                 except Exception:
                     logging.getLogger(__name__).exception('创建任务失败 strategy=%s instance=%s', strategy_id, instance['id'])
+
+    def _build_task(self, strategy_id, instance, scheduled_at):
+        """集中装配依赖；每个策略账户使用独立对象，Task只负责协调执行。"""
+        config = self.configs[strategy_id]
+        if instance['mode'] != 'pap' or config['strategy'] != 'etf_rotation':
+            raise ValueError('当前仅支持ETF轮动模拟账户')
+        return TradingTask(
+            strategy=ETFRotationStrategyImpl(config['parameters']),
+            market=AKShareMarket(self.settings['market']),
+            executor=PapTrader(instance['execution'], config['instruments']),
+            account_repository=PapAccountRepository(self.root / self.settings['storage']['data_dir'], instance['id']),
+            status_repository=TaskStatusRepository(self.root, strategy_id, instance['id']),
+            strategy_id=strategy_id, instance_id=instance['id'], initial_cash=instance['initial_cash'],
+            scheduled_at=scheduled_at,
+            trade_timeout_seconds=self.settings.get('runtime', {}).get('trade_timeout_seconds', 300),
+            log_context=strategy_logging(self.root, strategy_id, self.settings['logging']))
 
     def stop(self):
         """停止调度，通知全部任务退出，等待正在执行的工作结束后释放部署锁。"""
