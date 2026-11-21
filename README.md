@@ -201,12 +201,6 @@ curl -f http://127.0.0.1:8081/api/strategies
 使用 `deploy/nginx.conf` 配置 Nginx 转发 `8080 → 8081`；安装前备份现有站点，执行 `nginx -t` 通过后 reload。
 Azure 网络安全组放行 TCP `8080` 后，访问 `http://<服务器公网IP>:8080`。
 
-如需直接通过公网 `8081` 访问，设置以下参数，并在 Azure 网络安全组放行该端口：
-
-```bash
-TRADING_BIND_ADDRESS=0.0.0.0 docker compose up -d --build
-```
-
 - 配置：修改 `backend/dev/market_trading_bot/config` 后，执行 `docker compose restart trading` 生效。
 - 数据：账本和日志保存在命名卷，重建或停止容器均保留；`docker compose down -v` 会删除数据。已有本地账本需停服后手动迁移。
 - 运维：容器以非 root 用户运行，自动重启并轮转容器日志；只运行一个实例。
