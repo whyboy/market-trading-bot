@@ -252,7 +252,7 @@ class TaskScheduler:
     def _build_trade_task(self, strategy_id, instance, scheduled_at):
         """为一个策略账户装配独立的交易依赖。"""
         config = self.configs[strategy_id]
-        if instance['mode'] != 'TradeExecutor' or config['strategy'] != 'etf_rotation':
+        if instance['mode'] != 'pap' or config['strategy'] != 'etf_rotation':
             raise ValueError('当前仅支持ETF轮动模拟账户')
         data_dir = self.root / self.settings['storage']['data_dir']
         return TradingTask(

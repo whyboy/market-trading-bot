@@ -19,7 +19,7 @@ class DailySummaryTaskTests(unittest.TestCase):
         self.day = date(2026, 11, 20)
         self.current = datetime(2026, 11, 20, 15, 10, tzinfo=SHANGHAI)
         self.settings = {'storage': {'data_dir': 'data'}}
-        self.configs = {'etf_rotation': {'instances': [{'id': 'TradeExecutor', 'enabled': True, 'mode': 'TradeExecutor'}]}}
+        self.configs = {'etf_rotation': {'instances': [{'id': 'TradeExecutor', 'enabled': True, 'mode': 'pap'}]}}
         self.context = {'day': self.day, 'is_trading_day': True, 'previous_trading_day': date(2026, 11, 19)}
         self.notifier = Mock()
         self.stop = threading.Event()
@@ -57,7 +57,7 @@ class DailySummaryTaskTests(unittest.TestCase):
 
     def test_all_strategies_and_uninitialized_accounts_are_one_message(self):
         self.store()
-        self.configs['other'] = {'instances': [{'id': 'second', 'enabled': True, 'mode': 'TradeExecutor'}]}
+        self.configs['other'] = {'instances': [{'id': 'second', 'enabled': True, 'mode': 'pap'}]}
         self.task.start()
         self.task.thread.join(timeout=3)
         self.assertTrue(self.task.completed)

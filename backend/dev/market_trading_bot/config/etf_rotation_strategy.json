@@ -4,7 +4,7 @@
   "instances": [
     {
       "id": "etf_rotation_pap",
-      "mode": "TradeExecutor",
+      "mode": "pap",
       "enabled": true,
       "initial_cash": 100000,
       "execution": {

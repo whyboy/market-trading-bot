@@ -23,7 +23,7 @@ class AppTests(unittest.TestCase):
             'pushplus': {'token': 'test-token'},
             'storage': {'data_dir': 'data'}, 'logging': {'directory': 'logs', 'level': 'INFO', 'retention_dates': 30}}))
         (self.root / 'market_trading_bot/config/example_strategy.json').write_text(json.dumps({
-            'strategy': 'example', 'schedule': {'trade_time': '14:30'}, 'instances': [{'id': 'example_pap', 'mode': 'TradeExecutor', 'enabled': False}]}))
+            'strategy': 'example', 'schedule': {'trade_time': '14:30'}, 'instances': [{'id': 'example_pap', 'mode': 'pap', 'enabled': False}]}))
         self.patch = patch.object(app_module, 'ROOT', self.root)
         self.patch.start()
         self.client = TestClient(app_module.app)
