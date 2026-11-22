@@ -87,7 +87,7 @@ backend/.venv/bin/python backend/main.py
 |---|---|
 | `market` | 行情源、请求超时与间隔、报价最大延迟、历史回溯天数 |
 | `storage.data_dir` | SQLite 账本与 CSV 目录 |
-| `logging` | 日志目录、级别和保留日期数 |
+| `logging` | 日志目录、级别、保留日期数和统一输出格式 |
 | `schedule.calendar_time` / `schedule.valuation_time` | 必填；每日准备交易日历和估值的北京时间，配置示例为 `09:00` / `15:05` |
 | `runtime.trade_timeout_seconds` | 交易执行超时阈值，默认 300 秒，仅标记异常 |
 | `pushplus.token` | PushPlus 消息 Token，报告生成后直接发送 |
@@ -141,7 +141,7 @@ backend/.venv/bin/python backend/main.py
 
 ## 日志
 
-日志写入 `backend/dev/logs/<strategy>/YYYY-MM-DD.log`，默认保留最近 30 个有日志的日期。日志时间使用北京时间（Asia/Shanghai），包含运行状态、行情区间、报价、策略排名、目标权重和模拟成交摘要，不记录 Token。
+策略日志写入 `backend/dev/logs/<strategy>/YYYY-MM-DD.log`，默认保留最近 30 个有日志的日期；应用日志输出到控制台。两者共用 `logging` 配置中的级别、`format` 和 `date_format`，日志时间使用北京时间（Asia/Shanghai）。策略日志包含运行状态、行情区间、报价、策略排名、目标权重和模拟成交摘要，不记录 Token。
 
 ## 定时执行规则
 

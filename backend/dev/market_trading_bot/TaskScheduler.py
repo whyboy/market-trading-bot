@@ -5,6 +5,7 @@ import logging
 import threading
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime, time, timezone
+from market_trading_bot.log.LoggingConfig import configure_logging
 from market_trading_bot.log.StrategyLogger import strategy_logging
 from market_trading_bot.market.MarketProvider import MarketProvider, SHANGHAI
 from market_trading_bot.notification.PushPlusNotifier import PushPlusNotifier
@@ -55,6 +56,7 @@ class TaskScheduler:
     def start(self):
         """取得部署锁并注册定时任务；晚启动补做当天日历、估值和日报。"""
         self.settings = json.loads((self.root / 'market_trading_bot/config/global.json').read_text())
+        configure_logging(self.settings['logging'])
         directory = self.root / self.settings['storage']['data_dir'] / 'runtime'
         directory.mkdir(parents=True, exist_ok=True)
         self.lock_file = (directory / 'scheduler.lock').open('a')
