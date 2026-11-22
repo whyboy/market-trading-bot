@@ -3,7 +3,7 @@ import requests
 import time
 
 
-class PushPlusClient:
+class PushClient:
     class Error(RuntimeError):
         def __init__(self, message, retryable=False):
             super().__init__(message)

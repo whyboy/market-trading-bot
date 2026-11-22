@@ -16,7 +16,7 @@ DUE = datetime(2026, 11, 20, 14, 30, tzinfo=SHANGHAI)
 
 class TaskSchedulerTests(unittest.TestCase):
     def setUp(self):
-        sender = patch('market_trading_bot.notification.PushPlusClient.PushPlusClient.send', return_value='receipt')
+        sender = patch('market_trading_bot.notification.PushClient.PushClient.send', return_value='receipt')
         sender.start()
         self.addCleanup(sender.stop)
         self.temporary = tempfile.TemporaryDirectory()

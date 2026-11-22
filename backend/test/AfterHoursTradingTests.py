@@ -69,7 +69,7 @@ class AfterHoursTradingTests(unittest.TestCase):
                     self.assertLess(snapshot.history[-1].date, expected)
 
     def test_configured_weekend_chain_uses_friday_close(self):
-        with patch('market_trading_bot.notification.PushPlusClient.PushPlusClient.send', return_value='receipt') as send:
+        with patch('market_trading_bot.notification.PushClient.PushClient.send', return_value='receipt') as send:
             scheduler = TaskScheduler(self.root)
             scheduler.start()
             scheduler.timer.pause()
