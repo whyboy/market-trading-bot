@@ -47,6 +47,11 @@ class TaskSchedulerTests(unittest.TestCase):
         self.current = DUE.replace(hour=9, minute=0)
         self.scheduler.prepare_calendar_context()
 
+    def test_morning_greeting_uses_configured_time(self):
+        trigger = self.scheduler.timer.get_job('_morning_greeting').trigger
+        self.assertEqual(trigger.get_next_fire_time(None, self.current),
+                         (self.current + timedelta(days=1)).replace(hour=0, minute=15))
+
     def test_daily_calendar_trigger_is_nine_am(self):
         trigger = self.scheduler.timer.get_job('_calendar').trigger
         morning = DUE.replace(hour=9, minute=0)

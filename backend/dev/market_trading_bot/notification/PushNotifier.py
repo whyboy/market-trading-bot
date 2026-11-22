@@ -11,6 +11,15 @@ class PushNotifier:
         token = settings['pushplus']['token'].strip()
         self.client = PushClient(token)
 
+    def send_morning_greeting(self):
+        """发送交易日早安通知；推送失败只记录日志。"""
+        try:
+            self.client.send('主人，早上好！今天是交易日',
+                             '主人，早上好！今天又是美好的一天。\n程序目前运行正常，正在等待开盘。\n'
+                             '愿您今天一切顺利，又向财富自由迈进一步！')
+        except Exception:
+            self.logger.exception('交易日早安通知发送失败')
+
     def send_trade_report(self, task):
         """发送执行报告，无成交也发送；失败仅记录日志。"""
         try:
