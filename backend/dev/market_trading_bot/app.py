@@ -63,6 +63,16 @@ def account(instance_id: str):
     return AccountService.get_latest_account(ROOT / load_settings()['storage']['data_dir'], instance_id)
 
 
+@app.get('/api/accounts/{instance_id}/fills')
+def account_fills(instance_id: str, offset: int = Query(0, ge=0)):
+    """只读查询账户最近的模拟成交记录。"""
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', instance_id):
+        raise HTTPException(404, '账户不存在')
+    if not any(instance['id'] == instance_id for item in load_strategies() for instance in item.get('instances', [])):
+        raise HTTPException(404, '账户不存在')
+    return AccountService.get_recent_fills(ROOT / load_settings()['storage']['data_dir'], instance_id, offset=offset)
+
+
 @app.get('/api/accounts/{instance_id}/valuations')
 def account_valuations(instance_id: str):
     """只读查询已保存的每日收盘估值。"""
@@ -71,6 +81,17 @@ def account_valuations(instance_id: str):
     if not any(instance['id'] == instance_id for item in load_strategies() for instance in item.get('instances', [])):
         raise HTTPException(404, '账户不存在')
     return AccountService.get_valuations(ROOT / load_settings()['storage']['data_dir'], instance_id)
+
+
+@app.get('/api/strategies/{strategy_id}/candles')
+def strategy_candles(strategy_id: str):
+    """返回策略标的已缓存的前复权日 K 线。"""
+    config = get_strategy(strategy_id, load_strategies())
+    symbols = config.get('parameters', {}).get('etf_pool', [])
+    scheduler = getattr(app.state, 'scheduler', None)
+    task = getattr(scheduler, 'candle_task', None)
+    data = task.snapshot(symbols) if task else {symbol: {'candles': [], 'updated_at': None, 'error': None} for symbol in symbols}
+    return {'symbols': symbols, 'adjustment': 'qfq', 'series': data}
 
 
 @app.get('/api/strategies/{strategy_id}/logs')

@@ -73,3 +73,25 @@ footer { margin: 28px 0 0; text-align: center; }
 .return-chart svg line { stroke: #e6eee9; stroke-width: .3; vector-effect: non-scaling-stroke; }
 .return-chart svg polyline { fill: none; stroke: #31946a; stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
 .return-chart svg circle { fill: #31946a; }
+.candle-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.candle-heading .muted { margin: 8px 0 0; }
+.candle-legend { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.candle-legend button { display: inline-flex; align-items: center; gap: 7px; padding: 7px 9px; font-size: 12px; }
+.candle-legend i { width: 9px; height: 9px; border-radius: 50%; }
+.candle-legend .mutedSymbol { opacity: .4; }
+.candle-plot { width: 100%; overflow-x: auto; margin: 20px 0 0; }
+.candle-plot svg { display: block; width: 100%; min-width: 620px; height: auto; }
+.candle-grid { stroke: #e5ede8; stroke-width: 1; }
+.candle-axis { fill: #829088; font-size: 11px; }
+@media (max-width: 600px) { .candle-legend { justify-content: flex-start; } }
+.trade-history { margin-top: 28px; padding-top: 22px; border-top: 1px solid #edf2ef; }
+.trade-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.trade-heading h3 { margin: 0; font-size: 14px; }
+.trade-heading > span { color: #829088; font-size: 12px; }
+.trade-table { overflow-x: auto; margin-top: 10px; }
+.trade-table table { min-width: 690px; }
+.trade-table td { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.trade-side { display: inline-block; padding: 4px 9px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+.trade-side.buy { color: #1d7951; background: #e8f5ed; }
+.trade-side.sell { color: #b95751; background: #fbefed; }
+.load-fills { margin-top: 14px; }

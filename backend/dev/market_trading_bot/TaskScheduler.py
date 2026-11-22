@@ -11,6 +11,7 @@ from market_trading_bot.market.MarketProvider import MarketProvider, SHANGHAI
 from market_trading_bot.notification.PushPlusNotifier import PushPlusNotifier
 from market_trading_bot.service.AccountService import AccountService
 from market_trading_bot.strategy.ETFRotationStrategyImpl import ETFRotationStrategyImpl
+from market_trading_bot.task.CandleRefreshTask import CandleRefreshTask
 from market_trading_bot.task.DailySummaryTask import DailySummaryTask
 from market_trading_bot.task.DailyValuationTask import DailyValuationTask
 from market_trading_bot.task.TradingTask import TradingTask
@@ -95,6 +96,10 @@ class TaskScheduler:
                                    coalesce=True, max_instances=1, misfire_grace_time=None)
             # 每 5 秒更新服务心跳。
             self.timer.add_job(self._heartbeat, 'interval', seconds=5, id='_heartbeat')
+            # 启动时立即刷新日 K 线，此后每 5 分钟刷新，跳过重叠执行并合并错过的调度。
+            self.candle_task = CandleRefreshTask(self.settings, self.configs)
+            self.timer.add_job(self.candle_task.run, 'interval', minutes=5, next_run_time=self.now(),
+                               id='_candles', coalesce=True, max_instances=1)
             self.timer.start()
             # 启动时先准备当天日历；晚于收盘估值时间启动时补做估值和日报。
             self.prepare_calendar_context()
