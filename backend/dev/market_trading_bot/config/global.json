@@ -25,7 +25,7 @@
   },
   "schedule": {
     "calendar_time": "00:10",
-    "valuation_time": "00:15",
-    "morning_notification_time": "00:11"
+    "morning_notification_time": "00:11",
+    "valuation_time": "00:15"
   }
 }
