@@ -94,3 +94,4 @@ footer { margin: 28px 0 0; text-align: center; }
 .trade-side { display: inline-block; padding: 4px 9px; border-radius: 6px; font-size: 12px; font-weight: 600; }
 .trade-side.buy { color: #1d7951; background: #e8f5ed; }
 .trade-side.sell { color: #b95751; background: #fbefed; }
+.load-fills { margin-top: 14px; }
