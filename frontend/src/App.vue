@@ -9,6 +9,7 @@ const runtime = ref<Runtime | null>(null), runtimeError = ref(''), error = ref('
 const strategies = ref<Strategy[]>([]), strategyId = ref(''), accountId = ref('')
 const account = ref<Account | null>(null), logDates = ref<string[]>([]), selectedDay = ref('')
 const logText = ref(''), offset = ref(0), hasMore = ref(false), loadingLog = ref(false)
+const dateList = ref<HTMLElement | null>(null)
 const scheduledTask = computed(() => runtime.value?.scheduled_tasks?.find(task => task.instance_id === accountId.value))
 const taskLabel = (state: string) => ({ success: '成功', failed: '失败', running: '执行中' }[state] ?? state)
 const accounts = computed(() => strategies.value.find(config => config.id === strategyId.value)?.instances ?? [])
@@ -45,8 +46,21 @@ async function refreshAccount() {
 }
 async function refreshDates() {
   const requestId = ++datesRequestId
-  try { const result = await fetchJson<string[]>(`/api/strategies/${encodeURIComponent(strategyId.value)}/logs`); if (requestId === datesRequestId) logDates.value = result }
+  if (!strategyId.value) return
+  try {
+    const result = await fetchJson<string[]>(`/api/strategies/${encodeURIComponent(strategyId.value)}/logs`)
+    if (requestId !== datesRequestId) return
+    logDates.value = result
+    if (!result.length) {
+      ++logRequestId; selectedDay.value = ''; logText.value = ''; offset.value = 0; hasMore.value = false; loadingLog.value = false
+    } else if (!result.includes(selectedDay.value)) {
+      void loadLog(result[0]!)
+    }
+  }
   catch (cause) { if (requestId === datesRequestId) error.value = String(cause) }
+}
+function scrollDates(direction: number) {
+  dateList.value?.scrollBy({ left: direction * dateList.value.clientWidth, behavior: 'smooth' })
 }
 async function loadLog(day: string, append = false) {
   const requestId = ++logRequestId
@@ -89,7 +103,7 @@ async function fetchJson<T>(path: string): Promise<T> {
     <section><div class="section-title"><h2>策略与账户</h2><button @click="refreshAccount">刷新账户</button></div><div class="selectors"><label>策略<select v-model="strategyId"><option v-for="config in strategies" :key="config.id" :value="config.id">{{ config.id }}{{ config.enable ? '' : ' · 已停用' }}</option></select></label><label>账户<select v-model="accountId"><option v-for="item in accounts" :key="item.id" :value="item.id">{{ item.id }} · {{ item.mode }} · {{ item.enabled ? '已启用' : '已停用' }}</option></select></label></div>
     <div v-if="scheduledTask"><p>当日计划执行：{{ scheduledTask.next_execution_at ? formatTime(scheduledTask.next_execution_at) : '暂无计划' }}</p><p v-if="scheduledTask.last_execution">最近调度：{{ formatTime(scheduledTask.last_execution.scheduled_at) }} · {{ taskLabel(scheduledTask.last_execution.state) }} {{ scheduledTask.last_execution.error }}</p></div>
     <p v-if="!accountId" class="muted">暂无账户实例</p><p v-else-if="account && !account.initialized" class="muted">暂无账户记录，首次模拟调仓后显示。</p><template v-else-if="account?.initialized"><div class="metrics"><div><span>总资产</span><strong>¥ {{ formatMoney(account.equity) }}</strong></div><div><span>可用现金</span><strong>¥ {{ formatMoney(account.cash) }}</strong></div><div><span>持仓市值</span><strong>¥ {{ formatMoney(Number(account.equity) - Number(account.cash)) }}</strong></div><div><span>累计收益</span><strong>{{ account.initial_cash ? `${formatMoney((Number(account.equity) / Number(account.initial_cash) - 1) * 100)}%` : '—' }}</strong></div></div><p class="muted">最近调仓估值：{{ account.as_of ? formatTime(account.as_of) : account.date }}。资产并非实时行情估值。</p><table><thead><tr><th>持仓标的</th><th>数量</th></tr></thead><tbody><tr v-for="(position, symbol) in account.positions" :key="symbol"><td>{{ symbol }}</td><td>{{ position.quantity }}</td></tr></tbody></table><p v-if="!Object.keys(account.positions ?? {}).length" class="muted">当前空仓</p></template></section>
-    <section><div class="section-title"><h2>策略日志</h2><button :disabled="!strategyId" @click="refreshDates">刷新日期</button></div><p class="muted">按日期倒序排列，点击加载。日志按策略归档，可能包含多个账户。</p><div class="logs"><nav aria-label="日志日期"><button v-for="day in logDates" :key="day" :class="{ active: day === selectedDay }" @click="loadLog(day)">{{ day }}</button><p v-if="!logDates.length" class="muted">暂无日志</p></nav><div class="log-body"><div v-if="selectedDay" class="section-title"><span>{{ selectedDay }}</span><button :disabled="loadingLog" @click="loadLog(selectedDay)">刷新日志</button></div><pre>{{ logText || (loadingLog ? '加载中…' : selectedDay ? '当天日志为空' : '请选择左侧日期查看日志') }}</pre><button v-if="hasMore" :disabled="loadingLog" @click="loadLog(selectedDay, true)">{{ loadingLog ? '加载中…' : '加载更多' }}</button></div></div></section>
+    <section><div class="section-title"><h2>策略日志</h2><button :disabled="!strategyId" @click="refreshDates">刷新日期</button></div><p class="muted">按日期倒序排列，点击加载。日志按策略归档，可能包含多个账户。</p><div class="logs"><div class="date-navigation" v-if="logDates.length"><button aria-label="向左翻看日期" @click="scrollDates(-1)">‹</button><nav ref="dateList" aria-label="日志日期"><button v-for="day in logDates" :key="day" :class="{ active: day === selectedDay }" :aria-pressed="day === selectedDay" @click="loadLog(day)">{{ day }}</button></nav><button aria-label="向右翻看日期" @click="scrollDates(1)">›</button></div><p v-else class="muted">暂无日志</p><div class="log-body"><div v-if="selectedDay" class="section-title"><button class="refresh-log" :disabled="loadingLog" @click="loadLog(selectedDay)">刷新日志</button></div><pre>{{ logText || (loadingLog ? '加载中…' : selectedDay ? '当天日志为空' : '暂无日志可查看') }}</pre><button v-if="hasMore" :disabled="loadingLog" @click="loadLog(selectedDay, true)">{{ loadingLog ? '加载中…' : '加载更多' }}</button></div></div></section>
     <p v-if="error" class="error" role="alert">{{ error }}</p><footer>只读监控 · 不提供交易操作</footer>
   </main>
 </template>
