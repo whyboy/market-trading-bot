@@ -81,13 +81,17 @@ class MarketProvider:
     def load(self, symbols: tuple[str, ...], history_points: int) -> tuple[datetime, dict[str, MarketData]]:
         """加载连续历史收盘价及当日报价，校验交易时段、日期和价格。"""
         started_at = datetime.now(SHANGHAI)
-        self.logger.info('行情获取开始 daily=baostock,tencent quotes=tencent,sina symbols=%s', ','.join(symbols))
+        started_monotonic = clock.monotonic()
+        self.logger.info('行情获取开始 symbols=%s history_points=%d', ','.join(symbols), history_points)
         try:
             calendar = self.trading_calendar()
             if not calendar or not calendar[0] <= started_at.date() <= calendar[-1]:
                 raise MarketDataError('交易日历未覆盖当前日期')
             if started_at.date() not in calendar or not self._is_trading_session(started_at):
-                return self._load_close_snapshots(symbols, history_points, started_at, calendar)
+                as_of, snapshots = self._load_close_snapshots(symbols, history_points, started_at, calendar)
+                self.logger.info('行情获取成功 mode=close count=%d as_of=%s elapsed_seconds=%.2f',
+                                 len(snapshots), as_of.isoformat(), clock.monotonic() - started_monotonic)
+                return as_of, snapshots
             for symbol in symbols:
                 if not re.fullmatch(r'\d{6}\.(XSHG|XSHE)', symbol):
                     raise MarketDataError(f'不支持的证券代码: {symbol}')
@@ -114,7 +118,8 @@ class MarketProvider:
                 if not math.isfinite(price) or price <= 0:
                     raise MarketDataError(f'{symbol}: 价格无效')
                 snapshots[symbol] = MarketData(symbol, quoted_at, price, history)
-            self.logger.info('行情获取成功 count=%d as_of=%s', len(snapshots), as_of.isoformat())
+            self.logger.info('行情获取成功 mode=live count=%d as_of=%s elapsed_seconds=%.2f',
+                             len(snapshots), as_of.isoformat(), clock.monotonic() - started_monotonic)
             return as_of, snapshots
         except MarketDataError as exc:
             self.logger.error('行情获取失败: %s', exc)
@@ -164,7 +169,7 @@ class MarketProvider:
         for symbol in symbols:
             daily = self._request(self.get_daily_closes,
                 symbol=symbol, start=start_date, end=end_date, adjust='qfq', required_days=trading_days)
-            self.logger.info('历史日线获取结果 symbol=%s rows=%d window_days=%d', symbol, len(daily), self.lookback_days)
+            fetched_rows = len(daily)
             if daily.empty:
                 raise MarketDataError(f'{symbol}: 无历史行情')
             dates = pd.to_datetime(daily['日期'], errors='raise').dt.date
@@ -175,10 +180,11 @@ class MarketProvider:
             daily = daily.tail(len(trading_days))
             if daily['day'].tolist() != trading_days:
                 raise MarketDataError(f'{symbol}: 历史行情不足或缺少交易日，请检查回溯窗口及数据源')
-            self.logger.info('历史日线校验成功 symbol=%s used=%d start=%s end=%s', symbol, len(daily), daily.iloc[0]['day'], daily.iloc[-1]['day'])
             history = tuple(DailyClose(row.day, float(row.收盘)) for row in daily.itertuples())
             if any(not math.isfinite(bar.close) or bar.close <= 0 for bar in history):
                 raise MarketDataError(f'{symbol}: 价格无效')
+            self.logger.info('历史日线校验成功 symbol=%s rows=%d used=%d start=%s end=%s',
+                             symbol, fetched_rows, len(daily), daily.iloc[0]['day'], daily.iloc[-1]['day'])
             histories[symbol] = history
         return histories
 
@@ -191,6 +197,7 @@ class MarketProvider:
         if len(completed_days) <= history_points:
             raise MarketDataError('交易日历历史不足')
         close_day = completed_days[-1]
+        self.logger.info('非交易时段使用收盘价 execution_time=%s quote_date=%s', as_of.isoformat(), close_day)
         trading_days = completed_days[-history_points - 1:-1]
         prices = self.closing_prices(symbols, close_day)
         histories = self._load_daily_closes(symbols, trading_days, close_day)
@@ -198,7 +205,6 @@ class MarketProvider:
         if finished_at.date() != as_of.date():
             raise MarketDataError('行情获取跨日期，停止计算')
         quoted_at = datetime.combine(close_day, time(15), SHANGHAI)
-        self.logger.info('非交易时段使用收盘价：执行时间=%s 行情日期=%s', as_of.isoformat(), close_day)
         snapshots = {symbol: MarketData(symbol, quoted_at, float(prices[symbol]), histories[symbol])
                      for symbol in symbols}
         return finished_at, snapshots

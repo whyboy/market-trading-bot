@@ -41,9 +41,9 @@ def strategy_logging(root: Path, strategy: str, settings: dict):
         raise ValueError('策略日志名称只能包含字母、数字、下划线及连字符')
     logger = logging.Logger(f'market_trading_bot.{strategy}')
     logger.setLevel(settings['level'])
-    formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S%z')
+    formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S (UTC+8)')
     formatter.formatTime = lambda record, datefmt=None: datetime.fromtimestamp(
-        record.created, ZoneInfo('Asia/Shanghai')).strftime(datefmt or '%Y-%m-%d %H:%M:%S%z')
+        record.created, ZoneInfo('Asia/Shanghai')).strftime(datefmt or '%Y-%m-%d %H:%M:%S (UTC+8)')
     file_handler = StrategyLogger(root / settings['directory'] / strategy, settings['retention_dates'])
     console_handler = logging.StreamHandler()
     for handler in (file_handler, console_handler):

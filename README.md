@@ -141,7 +141,7 @@ backend/.venv/bin/python backend/main.py
 
 ## 日志
 
-日志写入 `backend/dev/logs/<strategy>/YYYY-MM-DD.log`，默认保留最近 30 个有日志的日期。日志包含运行状态、行情区间、报价、策略排名、目标权重和模拟成交摘要，不记录 Token。
+日志写入 `backend/dev/logs/<strategy>/YYYY-MM-DD.log`，默认保留最近 30 个有日志的日期。日志时间使用北京时间（Asia/Shanghai），包含运行状态、行情区间、报价、策略排名、目标权重和模拟成交摘要，不记录 Token。
 
 ## 定时执行规则
 
