@@ -84,9 +84,11 @@ class MarketProvider:
         started_monotonic = clock.monotonic()
         self.logger.info('行情获取开始 symbols=%s history_points=%d', ','.join(symbols), history_points)
         try:
+            self.logger.info('交易日历获取开始')
             calendar = self.trading_calendar()
             if not calendar or not calendar[0] <= started_at.date() <= calendar[-1]:
                 raise MarketDataError('交易日历未覆盖当前日期')
+            self.logger.info('交易日历获取成功 date=%s coverage=%s~%s', started_at.date(), calendar[0], calendar[-1])
             if started_at.date() not in calendar or not self._is_trading_session(started_at):
                 as_of, snapshots = self._load_close_snapshots(symbols, history_points, started_at, calendar)
                 self.logger.info('行情获取成功 mode=close count=%d as_of=%s elapsed_seconds=%.2f',
@@ -95,7 +97,6 @@ class MarketProvider:
             for symbol in symbols:
                 if not re.fullmatch(r'\d{6}\.(XSHG|XSHE)', symbol):
                     raise MarketDataError(f'不支持的证券代码: {symbol}')
-            self.logger.info('交易日历获取成功 date=%s coverage=%s~%s', started_at.date(), calendar[0], calendar[-1])
             trading_days = [day for day in calendar if day < started_at.date()][-history_points:]
             if len(trading_days) != history_points:
                 raise MarketDataError('交易日历历史不足')
@@ -118,7 +119,8 @@ class MarketProvider:
                 if not math.isfinite(price) or price <= 0:
                     raise MarketDataError(f'{symbol}: 价格无效')
                 snapshots[symbol] = MarketData(symbol, quoted_at, price, history)
-            self.logger.info('行情获取成功 mode=live count=%d as_of=%s elapsed_seconds=%.2f',
+            self.logger.info('批量当前报价获取成功 count=%d', len(snapshots))
+            self.logger.info('行情获取成功 mode=quote count=%d as_of=%s elapsed_seconds=%.2f',
                              len(snapshots), as_of.isoformat(), clock.monotonic() - started_monotonic)
             return as_of, snapshots
         except MarketDataError as exc:
@@ -134,6 +136,7 @@ class MarketProvider:
         for symbol in sorted(symbols):
             if not re.fullmatch(r'\d{6}\.(XSHG|XSHE)', symbol):
                 raise MarketDataError(f'不支持的证券代码: {symbol}')
+            self.logger.info('收盘价获取开始 symbol=%s date=%s', symbol, day)
             daily = self._request(self.get_daily_closes, symbol=symbol, start=day.isoformat(),
                                   end=day.isoformat(), adjust='', required_days=[day])
             if daily.empty:
@@ -145,6 +148,7 @@ class MarketProvider:
             if not price.is_finite() or price <= 0:
                 raise MarketDataError(f'{symbol}: 收盘价无效')
             prices[symbol] = price
+            self.logger.info('收盘价获取成功 symbol=%s date=%s price=%s', symbol, day, price)
         return prices
 
     def trading_calendar(self):
@@ -167,6 +171,7 @@ class MarketProvider:
         end_date = (before_day - timedelta(days=1)).isoformat()
         histories = {}
         for symbol in symbols:
+            self.logger.info('历史日线获取开始 symbol=%s start=%s end=%s', symbol, start_date, end_date)
             daily = self._request(self.get_daily_closes,
                 symbol=symbol, start=start_date, end=end_date, adjust='qfq', required_days=trading_days)
             fetched_rows = len(daily)
