@@ -36,6 +36,17 @@ class AccountService:
             DailyResultsRepository.create_table(connection)
 
     @staticmethod
+    def get_valuations(directory: Path, instance_id: str) -> list[dict]:
+        """只读返回已成功保存的每日估值，未开户时返回空列表。"""
+        if not re.fullmatch(r'[A-Za-z0-9_-]+', instance_id):
+            raise ValueError('实例ID只能包含字母、数字、下划线及连字符')
+        database = (directory / instance_id / 'ledger.sqlite3').resolve()
+        if not database.exists():
+            return []
+        with closing(sqlite3.connect(f'{database.as_uri()}?mode=ro', uri=True)) as connection:
+            return [json.loads(row[0]) for row in DailyResultsRepository.all_valuations(connection)]
+
+    @staticmethod
     def get_latest_account(directory: Path, instance_id: str) -> dict:
         """只读查询最近交易资产；未开户返回 initialized=False。"""
         snapshot = AccountService.get_snapshot(directory, instance_id, '9999-12-31')
@@ -185,4 +196,3 @@ class AccountService:
         """写入开户资金、账户归属和 UTC 开户时间。"""
         AccountRepository.insert_account(connection, (str(initial_cash), self.instance_id, self.strategy_id,
                                                 datetime.now(timezone.utc).isoformat()))
-
