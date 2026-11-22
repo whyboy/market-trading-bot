@@ -69,3 +69,16 @@ class HttpMarket:
             raise ValueError('腾讯日线接口返回错误')
         rows = data['data'][code]['qfqday' if adjust == 'qfq' else 'day']
         return pd.DataFrame([(row[0], row[2]) for row in rows], columns=['日期', '收盘'])
+
+    def get_daily_candles(self, symbol, start, end):
+        """获取腾讯前复权日线，返回日期、开高低收。"""
+        code = self.code(symbol)
+        response = requests.get('https://web.ifzq.gtimg.cn/appstock/app/fqkline/get',
+                                params={'param': f'{code},day,{start},{end},640,qfq'}, timeout=self.timeout)
+        response.raise_for_status()
+        data = response.json()
+        if data.get('code') != 0:
+            raise ValueError('腾讯日线接口返回错误')
+        rows = data['data'][code]['qfqday']
+        return [{'date': row[0], 'open': float(row[1]), 'close': float(row[2]),
+                 'high': float(row[3]), 'low': float(row[4])} for row in rows]

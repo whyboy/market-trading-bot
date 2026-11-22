@@ -102,6 +102,10 @@ class MarketProvider:
         """获取完整交易日历，沿用行情请求超时和间隔配置。"""
         return sorted(set(self._request(ak.calendar_trade_date_hist_sina)['trade_date']))
 
+    def get_daily_candles(self, symbol, start, end):
+        """获取前复权日 K 线。"""
+        return self._request(self.http.get_daily_candles, symbol=symbol, start=start, end=end)
+
     def closing_prices(self, symbols, day):
         """查询 day 当天的不复权收盘价，返回 symbol 到 Decimal 的映射。"""
         prices = {}

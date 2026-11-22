@@ -73,6 +73,17 @@ def account_valuations(instance_id: str):
     return AccountService.get_valuations(ROOT / load_settings()['storage']['data_dir'], instance_id)
 
 
+@app.get('/api/strategies/{strategy_id}/candles')
+def strategy_candles(strategy_id: str):
+    """返回策略标的已缓存的前复权日 K 线。"""
+    config = get_strategy(strategy_id, load_strategies())
+    symbols = config.get('parameters', {}).get('etf_pool', [])
+    scheduler = getattr(app.state, 'scheduler', None)
+    task = getattr(scheduler, 'candle_task', None)
+    data = task.snapshot(symbols) if task else {symbol: {'candles': [], 'updated_at': None, 'error': None} for symbol in symbols}
+    return {'symbols': symbols, 'adjustment': 'qfq', 'series': data}
+
+
 @app.get('/api/strategies/{strategy_id}/logs')
 def log_dates(strategy_id: str):
     return sorted([path.stem for path in log_dir(strategy_id).glob('*.log')

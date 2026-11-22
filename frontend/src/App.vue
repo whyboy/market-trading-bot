@@ -6,6 +6,8 @@ type ScheduledTask = { instance_id: string; next_execution_at?: string; last_exe
 type Runtime = { online: boolean; state: string; health?: string; heartbeat_scope?: string; is_trading_day?: boolean | null; scheduler_enabled?: boolean; scheduler_error?: string; scheduled_tasks?: ScheduledTask[]; started_at?: string; heartbeat_at?: string; uptime_seconds?: number; last_execution?: { success: boolean; error?: string; finished_at: string } }
 type Account = { initialized: boolean; as_of?: string; date?: string; cash?: string; equity?: string; initial_cash?: string; positions?: Record<string, { quantity: number }> }
 type Valuation = { date: string; daily_pnl?: string; daily_return_pct?: string; cumulative_return_pct: string }
+type Candle = { date: string; open: number; high: number; low: number; close: number }
+type CandleResponse = { symbols: string[]; series: Record<string, { candles: Candle[]; updated_at: string | null; error: string | null }> }
 const runtime = ref<Runtime | null>(null), runtimeError = ref(''), error = ref('')
 const strategies = ref<Strategy[]>([]), strategyId = ref(''), accountId = ref('')
 const account = ref<Account | null>(null), logDates = ref<string[]>([]), selectedDay = ref('')
@@ -21,6 +23,35 @@ const chartPoints = computed(() => {
 })
 const logText = ref(''), offset = ref(0), hasMore = ref(false), loadingLog = ref(false)
 const dateList = ref<HTMLElement | null>(null)
+const candleData = ref<CandleResponse | null>(null), hiddenSymbols = ref<string[]>([]), candleError = ref('')
+const candleColors = ['#287bba', '#dd9143', '#8a68be', '#319b86', '#cd6b80', '#78844e']
+const visibleCandles = computed(() => (candleData.value?.symbols ?? []).filter(symbol => !hiddenSymbols.value.includes(symbol)))
+const candleChart = computed(() => {
+  const series = candleData.value?.series ?? {}
+  const dates = [...new Set(visibleCandles.value.flatMap(symbol => (series[symbol]?.candles ?? []).map(item => item.date)))].sort()
+  const items = visibleCandles.value.flatMap(symbol => (series[symbol]?.candles ?? []).map(item => ({ ...item, symbol })))
+  if (!dates.length || !items.length) return null
+  const min = Math.min(...items.map(item => item.low)), max = Math.max(...items.map(item => item.high))
+  const padding = Math.max((max - min) * .08, max * .005), bottom = min - padding, top = max + padding
+  const y = (value: number) => 20 + (top - value) / (top - bottom) * 260
+  const step = 840 / dates.length, width = Math.max(1, Math.min(7, step / Math.max(visibleCandles.value.length, 1) * .8))
+  return { dates, ticks: [top, (top + bottom) / 2, bottom], y, width,
+    items: items.map(item => ({ ...item, x: 60 + (dates.indexOf(item.date) + .5) * step +
+      (visibleCandles.value.indexOf(item.symbol) - (visibleCandles.value.length - 1) / 2) * width,
+      color: candleColors[(candleData.value?.symbols.indexOf(item.symbol) ?? 0) % candleColors.length] })) }
+})
+let candleRequestId = 0
+async function refreshCandles() {
+  const requestId = ++candleRequestId
+  if (!strategyId.value) return
+  try {
+    const result = await fetchJson<CandleResponse>(`/api/strategies/${encodeURIComponent(strategyId.value)}/candles`)
+    if (requestId === candleRequestId) { candleData.value = result; candleError.value = '' }
+  } catch { if (requestId === candleRequestId) candleError.value = 'K线数据加载失败，请稍后重试。' }
+}
+function toggleSymbol(symbol: string) {
+  hiddenSymbols.value = hiddenSymbols.value.includes(symbol) ? hiddenSymbols.value.filter(item => item !== symbol) : [...hiddenSymbols.value, symbol]
+}
 const scheduledTask = computed(() => runtime.value?.scheduled_tasks?.find(task => task.instance_id === accountId.value))
 const taskLabel = (state: string) => ({ success: '成功', failed: '失败', running: '执行中' }[state] ?? state)
 const accounts = computed(() => strategies.value.find(config => config.id === strategyId.value)?.instances ?? [])
@@ -93,15 +124,17 @@ watch(strategyId, () => {
   ++logRequestId; selectedDay.value = ''; logText.value = ''; hasMore.value = false; loadingLog.value = false; logDates.value = []; error.value = ''
   accountId.value = accounts.value[0]?.id ?? ''
   void refreshDates()
+  candleData.value = null; hiddenSymbols.value = []; candleError.value = ''; void refreshCandles()
 })
 watch(accountId, () => { runtime.value = null; void refreshRuntime(); void refreshAccount() })
-let timer: ReturnType<typeof setInterval> | undefined
+let timer: ReturnType<typeof setInterval> | undefined, candleTimer: ReturnType<typeof setInterval> | undefined
 onMounted(async () => {
   timer = setInterval(refreshRuntime, 5000)
+  candleTimer = setInterval(refreshCandles, 30000)
   try { strategies.value = await fetchJson<Strategy[]>('/api/strategies'); strategyId.value = strategies.value[0]?.id ?? '' }
   catch (cause) { error.value = String(cause) }
 })
-onUnmounted(() => { clearInterval(timer); ++runtimeRequestId; ++logRequestId; ++accountRequestId; ++datesRequestId })
+onUnmounted(() => { clearInterval(timer); clearInterval(candleTimer); ++runtimeRequestId; ++logRequestId; ++accountRequestId; ++datesRequestId; ++candleRequestId })
 async function fetchJson<T>(path: string): Promise<T> {
   const response = await fetch(path)
   if (!response.ok) throw new Error(`请求失败（${response.status}）`)
@@ -117,6 +150,14 @@ async function fetchJson<T>(path: string): Promise<T> {
     <section><div class="section-title"><h2>策略与账户</h2><button @click="refreshAccount">刷新账户</button></div><div class="selectors"><label>策略<select v-model="strategyId"><option v-for="config in strategies" :key="config.id" :value="config.id">{{ config.id }}{{ config.enable ? '' : ' · 已停用' }}</option></select></label><label>账户<select v-model="accountId"><option v-for="item in accounts" :key="item.id" :value="item.id">{{ item.id }} · {{ item.mode }} · {{ item.enabled ? '已启用' : '已停用' }}</option></select></label></div>
     <div v-if="scheduledTask"><p>当日计划执行：{{ scheduledTask.next_execution_at ? formatTime(scheduledTask.next_execution_at) : '暂无计划' }}</p><p v-if="scheduledTask.last_execution">最近调度：{{ formatTime(scheduledTask.last_execution.scheduled_at) }} · {{ taskLabel(scheduledTask.last_execution.state) }} {{ scheduledTask.last_execution.error }}</p></div>
     <p v-if="!accountId" class="muted">暂无账户实例</p><p v-else-if="account && !account.initialized" class="muted">暂无账户记录，首次模拟调仓后显示。</p><template v-else-if="account?.initialized"><div class="metrics"><div><span>总资产</span><strong>¥ {{ formatMoney(account.equity) }}</strong></div><div><span>可用现金</span><strong>¥ {{ formatMoney(account.cash) }}</strong></div><div><span>持仓市值</span><strong>¥ {{ formatMoney(Number(account.equity) - Number(account.cash)) }}</strong></div><div><span>累计收益</span><strong>{{ account.initial_cash ? `${formatMoney((Number(account.equity) / Number(account.initial_cash) - 1) * 100)}%` : '—' }}</strong></div><div><span>今日收益 · 收盘估值</span><strong v-if="todayValuation" :class="{ gain: Number(todayValuation.daily_pnl) > 0, loss: Number(todayValuation.daily_pnl) < 0 }"><span class="pnl-arrow" v-if="Number(todayValuation.daily_pnl) !== 0" aria-hidden="true">{{ Number(todayValuation.daily_pnl) > 0 ? '▲' : '▼' }}</span>¥ {{ formatMoney(todayValuation.daily_pnl) }} <small v-if="todayValuation.daily_return_pct != null">({{ formatMoney(todayValuation.daily_return_pct) }}%)</small></strong><strong v-else>—</strong></div></div><p class="muted">今日收益基于当日收盘估值，估值完成后显示。</p><div class="return-chart"><div class="chart-heading"><h3>累计收益曲线</h3><span>基于每日收盘估值</span></div><template v-if="chartValues.length"><div class="chart-summary"><strong>{{ formatMoney(chartValues[chartValues.length - 1]?.cumulative_return_pct) }}%</strong><span>最新累计收益</span></div><svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="累计收益率曲线"><line x1="4" y1="90" x2="96" y2="90" /><line x1="4" y1="50" x2="96" y2="50" /><line x1="4" y1="10" x2="96" y2="10" /><polyline v-if="chartValues.length > 1" :points="chartPoints" /><circle v-else cx="50" cy="50" r="1.2" /></svg><div class="chart-dates"><span>{{ chartValues[0]?.date }}</span><span>{{ chartValues[chartValues.length - 1]?.date }}</span></div></template><p v-else class="muted">暂无收盘估值数据</p></div><p class="muted">最近调仓估值：{{ account.as_of ? formatTime(account.as_of) : account.date }}。资产并非实时行情估值。</p><table><thead><tr><th>持仓标的</th><th>数量</th></tr></thead><tbody><tr v-for="(position, symbol) in account.positions" :key="symbol"><td>{{ symbol }}</td><td>{{ position.quantity }}</td></tr></tbody></table><p v-if="!Object.keys(account.positions ?? {}).length" class="muted">当前空仓</p></template></section>
+    <section class="candles-section">
+      <div class="candle-heading"><div><h2>策略标的</h2><p class="muted">最近 90 个自然日 · 前复权日 K · 仅展示已完成交易日</p></div><div class="candle-legend" aria-label="选择显示的标的"><button v-for="(symbol, index) in candleData?.symbols ?? []" :key="symbol" :class="{ mutedSymbol: hiddenSymbols.includes(symbol) }" :aria-pressed="!hiddenSymbols.includes(symbol)" @click="toggleSymbol(symbol)"><i :style="{ background: candleColors[index % candleColors.length] }"></i>{{ symbol }}</button></div></div>
+      <p v-if="candleError" class="error">{{ candleError }}</p>
+      <p v-for="symbol in candleData?.symbols ?? []" :key="symbol" v-show="candleData?.series[symbol]?.error" class="muted">{{ symbol }} 更新失败，{{ candleData?.series[symbol]?.updated_at ? `显示上次成功数据（${formatTime(candleData.series[symbol]?.updated_at ?? undefined)}）` : '暂无数据' }}。</p>
+      <div v-if="candleChart" class="candle-plot"><svg viewBox="0 0 920 320" role="img" aria-label="策略标的前复权日K线图"><g v-for="(tick, index) in candleChart.ticks" :key="index"><line x1="60" x2="900" :y1="20 + index * 130" :y2="20 + index * 130" class="candle-grid" /><text x="52" :y="24 + index * 130" text-anchor="end" class="candle-axis">{{ tick.toFixed(2) }}</text></g><g v-for="item in candleChart.items" :key="item.symbol + item.date"><title>{{ item.symbol }} · {{ item.date }} 开 {{ item.open }} 高 {{ item.high }} 低 {{ item.low }} 收 {{ item.close }}</title><line :x1="item.x" :x2="item.x" :y1="candleChart.y(item.high)" :y2="candleChart.y(item.low)" :stroke="item.color" /><rect :x="item.x - candleChart.width / 2" :y="candleChart.y(Math.max(item.open, item.close))" :width="candleChart.width" :height="Math.max(1, Math.abs(candleChart.y(item.open) - candleChart.y(item.close)))" :stroke="item.color" :fill="item.close >= item.open ? item.color : 'white'" /></g><text x="60" y="307" class="candle-axis">{{ candleChart.dates[0] }}</text><text x="900" y="307" text-anchor="end" class="candle-axis">{{ candleChart.dates[candleChart.dates.length - 1] }}</text></svg></div>
+      <p v-else class="muted">{{ candleData ? (visibleCandles.length ? 'K线数据准备中或暂无数据。' : '请选择要显示的标的。') : '正在加载K线数据…' }}</p>
+      <p class="muted">点击标的名称切换显示；实心表示收盘不低于开盘，空心表示收盘低于开盘。鼠标悬停查看价格。</p>
+    </section>
     <section><div class="section-title"><h2>策略日志</h2><button :disabled="!strategyId" @click="refreshDates">刷新日期</button></div><p class="muted">按日期倒序排列，点击加载。日志按策略归档，可能包含多个账户。</p><div class="logs"><div class="date-navigation" v-if="logDates.length"><button aria-label="向左翻看日期" @click="scrollDates(-1)">‹</button><nav ref="dateList" aria-label="日志日期"><button v-for="day in logDates" :key="day" :class="{ active: day === selectedDay }" :aria-pressed="day === selectedDay" @click="loadLog(day)">{{ day }}</button></nav><button aria-label="向右翻看日期" @click="scrollDates(1)">›</button></div><p v-else class="muted">暂无日志</p><div class="log-body"><div v-if="selectedDay" class="section-title"><button class="refresh-log" :disabled="loadingLog" @click="loadLog(selectedDay)">刷新日志</button></div><pre>{{ logText || (loadingLog ? '加载中…' : selectedDay ? '当天日志为空' : '暂无日志可查看') }}</pre><button v-if="hasMore" :disabled="loadingLog" @click="loadLog(selectedDay, true)">{{ loadingLog ? '加载中…' : '加载更多' }}</button></div></div></section>
     <p v-if="error" class="error" role="alert">{{ error }}</p><footer>只读监控 · 不提供交易操作</footer>
   </main>
