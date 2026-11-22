@@ -35,6 +35,10 @@ class DailyResultsRepository:
         return connection.execute('SELECT execution_payload FROM daily_results WHERE execution_payload IS NOT NULL ORDER BY day', parameters)
 
     @staticmethod
+    def executions_descending(connection, parameters=()):
+        return connection.execute('SELECT execution_payload FROM daily_results WHERE execution_payload IS NOT NULL ORDER BY day DESC', parameters)
+
+    @staticmethod
     def latest_valuation(connection, parameters=()):
         return connection.execute("SELECT valuation_payload FROM daily_results\n                WHERE day<=? AND valuation_status='success' AND valuation_payload IS NOT NULL\n                ORDER BY day DESC LIMIT 1", parameters)
 

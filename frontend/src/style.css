@@ -84,3 +84,13 @@ footer { margin: 28px 0 0; text-align: center; }
 .candle-grid { stroke: #e5ede8; stroke-width: 1; }
 .candle-axis { fill: #829088; font-size: 11px; }
 @media (max-width: 600px) { .candle-legend { justify-content: flex-start; } }
+.trade-history { margin-top: 28px; padding-top: 22px; border-top: 1px solid #edf2ef; }
+.trade-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.trade-heading h3 { margin: 0; font-size: 14px; }
+.trade-heading > span { color: #829088; font-size: 12px; }
+.trade-table { overflow-x: auto; margin-top: 10px; }
+.trade-table table { min-width: 690px; }
+.trade-table td { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.trade-side { display: inline-block; padding: 4px 9px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+.trade-side.buy { color: #1d7951; background: #e8f5ed; }
+.trade-side.sell { color: #b95751; background: #fbefed; }

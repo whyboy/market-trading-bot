@@ -63,6 +63,16 @@ def account(instance_id: str):
     return AccountService.get_latest_account(ROOT / load_settings()['storage']['data_dir'], instance_id)
 
 
+@app.get('/api/accounts/{instance_id}/fills')
+def account_fills(instance_id: str):
+    """只读查询账户最近的模拟成交记录。"""
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', instance_id):
+        raise HTTPException(404, '账户不存在')
+    if not any(instance['id'] == instance_id for item in load_strategies() for instance in item.get('instances', [])):
+        raise HTTPException(404, '账户不存在')
+    return AccountService.get_recent_fills(ROOT / load_settings()['storage']['data_dir'], instance_id)
+
+
 @app.get('/api/accounts/{instance_id}/valuations')
 def account_valuations(instance_id: str):
     """只读查询已保存的每日收盘估值。"""
