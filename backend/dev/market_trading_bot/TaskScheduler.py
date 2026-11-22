@@ -96,6 +96,7 @@ class TaskScheduler:
                                    coalesce=True, max_instances=1, misfire_grace_time=None)
             # 每 5 秒更新服务心跳。
             self.timer.add_job(self._heartbeat, 'interval', seconds=5, id='_heartbeat')
+            # 启动时立即刷新日 K 线，此后每 5 分钟刷新，跳过重叠执行并合并错过的调度。
             self.candle_task = CandleRefreshTask(self.settings, self.configs)
             self.timer.add_job(self.candle_task.run, 'interval', minutes=5, next_run_time=self.now(),
                                id='_candles', coalesce=True, max_instances=1)
