@@ -119,7 +119,6 @@ class MarketProvider:
                 if not math.isfinite(price) or price <= 0:
                     raise MarketDataError(f'{symbol}: 价格无效')
                 snapshots[symbol] = MarketData(symbol, quoted_at, price, history)
-            self.logger.info('批量当前报价获取成功 count=%d', len(snapshots))
             self.logger.info('行情获取成功 mode=quote count=%d as_of=%s elapsed_seconds=%.2f',
                              len(snapshots), as_of.isoformat(), clock.monotonic() - started_monotonic)
             return as_of, snapshots

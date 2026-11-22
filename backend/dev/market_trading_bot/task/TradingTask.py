@@ -82,6 +82,7 @@ class TradingTask:
         """已有当日账本则直接返回，否则获取行情、计算信号并原子调仓。"""
         committed = self.account_store.get_execution(self.scheduled_at.date().isoformat())
         if committed is None:
+            self.logger.info('获取行情 instance=%s', self.instance_id)
             as_of, snapshots = self.market.load(self.strategy.symbols, self.strategy.history_points)
             signal = self.strategy.calculate(snapshots, as_of)
             if signal.as_of.date() != self.scheduled_at.date():
@@ -89,6 +90,7 @@ class TradingTask:
             for rank, item in enumerate(signal.ranking, start=1):
                 self.logger.info('策略排名 instance=%s rank=%d symbol=%s score=%.8f target_weight=%.6f',
                                  self.instance_id, rank, item.symbol, item.score, signal.target_weights[item.symbol])
+            self.logger.info('策略计算完成 instance=%s target_weights=%s', self.instance_id, signal.target_weights)
             committed = self._rebalance(signal)
         output = {'operation': 'pap_rebalance', 'instance_id': self.instance_id, **committed}
         try:
