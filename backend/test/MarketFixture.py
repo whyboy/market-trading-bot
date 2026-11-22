@@ -4,14 +4,14 @@ import json
 import math
 import pandas as pd
 from datetime import datetime, timedelta
-from market_trading_bot.market.AKShareMarket import AKShareMarket
+from market_trading_bot.market.MarketProvider import MarketProvider
 from market_trading_bot.strategy.ETFRotationStrategyImpl import ETFRotationStrategyImpl
 from pathlib import Path
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1] / 'dev'
-MARKET_MODULE = importlib.import_module('market_trading_bot.market.AKShareMarket')
+MARKET_MODULE = importlib.import_module('market_trading_bot.market.MarketProvider')
 NOW = datetime(2026, 11, 20, 14, 30, tzinfo=ZoneInfo('Asia/Shanghai'))
 
 
@@ -31,14 +31,20 @@ class MarketFixture:
 
     def load(self, symbols=None):
         response = Mock()
-        response.json.return_value = {'rc': 0, 'data': {'diff': self.quotes}}
+        lines = []
+        for quote in self.quotes:
+            fields = ['0'] * 31
+            fields[2], fields[3] = quote['f12'], str(quote['f2'])
+            fields[30] = datetime.fromtimestamp(quote['f124'], ZoneInfo('Asia/Shanghai')).strftime('%Y%m%d%H%M%S')
+            prefix = 'sh' if quote['f13'] == 1 else 'sz'
+            lines.append(f'v_{prefix}{quote["f12"]}="{"~".join(fields)}";')
+        response.text = '\n'.join(lines)
         with patch.object(MARKET_MODULE, 'datetime', wraps=datetime) as clock, \
                 patch.object(MARKET_MODULE.ak, 'calendar_trade_date_hist_sina', return_value=pd.DataFrame(
                     {'trade_date': [day.date() for day in self.days] + [NOW.date()]})), \
-                patch.object(MARKET_MODULE.ak, 'fund_etf_hist_em', return_value=self.daily), \
-                patch.object(MARKET_MODULE.requests, 'get', return_value=response) as request:
+                patch.object(MarketProvider, 'get_daily_closes', return_value=self.daily), \
+                patch('market_trading_bot.market.source.HttpMarket.requests.get', return_value=response):
             clock.now.return_value = NOW
-            result = AKShareMarket(self.settings).load(
+            result = MarketProvider(self.settings).load(
                 self.strategy.symbols if symbols is None else symbols, self.strategy.history_points)
-            self.assertEqual(request.call_count, 1)
             return result

@@ -4,7 +4,7 @@ import tempfile
 import threading
 import unittest
 from datetime import date, datetime, timedelta, timezone
-from market_trading_bot.market.AKShareMarket import SHANGHAI
+from market_trading_bot.market.MarketProvider import SHANGHAI
 from market_trading_bot.task.TradingTask import TradingTask
 from market_trading_bot.TaskScheduler import TaskScheduler
 from pathlib import Path
@@ -29,7 +29,7 @@ class TaskSchedulerTests(unittest.TestCase):
         self.current = DUE.replace(hour=8, minute=0)
         self.clock = patch.object(TaskScheduler, 'now', side_effect=lambda: self.current)
         self.clock.start()
-        self.calendar_patch = patch('market_trading_bot.TaskScheduler.AKShareMarket.trading_calendar',
+        self.calendar_patch = patch('market_trading_bot.TaskScheduler.MarketProvider.trading_calendar',
                                     return_value=[date(2026, 11, 19), date(2026, 11, 20), date(2026, 11, 24)])
         self.calendar = self.calendar_patch.start()
         self.scheduler = TaskScheduler(self.root)

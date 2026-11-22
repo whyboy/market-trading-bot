@@ -28,8 +28,8 @@
     "select_num": 1
   },
   "schedule": {
-    "trade_time": "14:30",
-    "report_time": "15:15"
+    "trade_time": "02:10",
+    "report_time": "02:20"
   },
   "instruments": {
     "518880.XSHG": {

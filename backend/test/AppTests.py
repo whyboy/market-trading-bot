@@ -8,7 +8,7 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from market_trading_bot import app as app_module
-from market_trading_bot.market.AKShareMarket import SHANGHAI
+from market_trading_bot.market.MarketProvider import SHANGHAI
 from market_trading_bot.task.TradingTask import TradingTask
 from market_trading_bot.TaskScheduler import TaskScheduler
 from pathlib import Path
@@ -33,7 +33,7 @@ class AppTests(unittest.TestCase):
         self.client = TestClient(app_module.app)
         self.clock_patch = patch.object(TaskScheduler, 'now', return_value=datetime.now(SHANGHAI).replace(hour=8, minute=0))
         self.clock_patch.start()
-        self.calendar_patch = patch('market_trading_bot.TaskScheduler.AKShareMarket.trading_calendar',
+        self.calendar_patch = patch('market_trading_bot.TaskScheduler.MarketProvider.trading_calendar',
                                     side_effect=lambda: [TaskScheduler.now().date() - timedelta(days=1), TaskScheduler.now().date()])
         self.calendar_patch.start()
         def build(scheduler, strategy_id, instance, scheduled_at):

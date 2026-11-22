@@ -6,13 +6,13 @@ import pandas as pd
 import tempfile
 import unittest
 from datetime import datetime, timedelta
-from market_trading_bot.market.AKShareMarket import AKShareMarket, SHANGHAI
+from market_trading_bot.market.MarketProvider import MarketProvider, SHANGHAI
 from market_trading_bot.TaskScheduler import TaskScheduler
 from pathlib import Path
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1] / 'dev'
-MARKET = importlib.import_module('market_trading_bot.market.AKShareMarket')
+MARKET = importlib.import_module('market_trading_bot.market.MarketProvider')
 
 
 class AfterHoursTradingTests(unittest.TestCase):
@@ -43,20 +43,20 @@ class AfterHoursTradingTests(unittest.TestCase):
         self.addCleanup(self.market_clock.stop)
         for item in (
             patch.object(MARKET.ak, 'calendar_trade_date_hist_sina', return_value=pd.DataFrame({'trade_date': self.days})),
-            patch.object(MARKET.ak, 'fund_etf_hist_em', side_effect=self.history),
+            patch.object(MarketProvider, 'get_daily_closes', side_effect=self.history),
         ):
             item.start()
             self.addCleanup(item.stop)
 
     def history(self, **kwargs):
-        dates = pd.to_datetime(self.daily['日期']).dt.strftime('%Y%m%d')
-        return self.daily[(dates >= kwargs['start_date']) & (dates <= kwargs['end_date'])].copy()
+        dates = pd.to_datetime(self.daily['日期']).dt.strftime('%Y-%m-%d')
+        return self.daily[(dates >= kwargs['start']) & (dates <= kwargs['end'])].copy()
 
     def test_latest_close_in_weekend_before_open_lunch_and_after_close(self):
         saturday = self.current
         friday = saturday - timedelta(days=1)
         monday = saturday + timedelta(days=2)
-        market = AKShareMarket(self.settings['market'])
+        market = MarketProvider(self.settings['market'])
         for current, expected in ((saturday.replace(hour=19), friday.date()),
                                   (monday.replace(hour=8), friday.date()),
                                   (monday.replace(hour=12), friday.date()),

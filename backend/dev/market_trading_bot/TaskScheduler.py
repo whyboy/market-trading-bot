@@ -6,7 +6,7 @@ import threading
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime, time, timezone
 from market_trading_bot.log.StrategyLogger import strategy_logging
-from market_trading_bot.market.AKShareMarket import AKShareMarket, SHANGHAI
+from market_trading_bot.market.MarketProvider import MarketProvider, SHANGHAI
 from market_trading_bot.notification.PushPlusNotifier import PushPlusNotifier
 from market_trading_bot.service.AccountService import AccountService
 from market_trading_bot.strategy.ETFRotationStrategyImpl import ETFRotationStrategyImpl
@@ -111,7 +111,7 @@ class TaskScheduler:
             today = self.now().date()
             if self.calendar_context is not None and self.calendar_context['day'] == today:
                 return
-            market = AKShareMarket(self.settings['market'])
+            market = MarketProvider(self.settings['market'])
             attempts = 0
             started_after_close = self.now().time() >= time(15)
             while not self.stop_event.is_set() and self.now().date() == today:
@@ -176,7 +176,7 @@ class TaskScheduler:
         data_dir = self.root / self.settings['storage']['data_dir']
         return TradingTask(
             strategy=ETFRotationStrategyImpl(config['parameters']),
-            market=AKShareMarket(self.settings['market']),
+            market=MarketProvider(self.settings['market']),
             executor=TradeExecutor(instance['execution'], config['instruments']),
             account_store=AccountService(data_dir, instance['id'], strategy_id),
             strategy_id=strategy_id, instance_id=instance['id'], initial_cash=instance['initial_cash'],
