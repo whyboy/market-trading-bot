@@ -156,14 +156,13 @@ class TaskScheduler:
                 'previous_trading_day': max(value for value in calendar if value < day)}
 
     def _send_morning_greeting(self):
-        """仅在确认当天为交易日时发送早安通知。"""
-        today = self.now().date()
+        """每天发送早安通知，使用已准备好的当日日历状态。"""
         if self.stop_event.is_set():
             return
-        context = self._trading_day_context(today)
-        if (context is not None and context['is_trading_day'] and not self.stop_event.is_set()
-                and self.now().date() == today):
-            self.notifier.send_morning_greeting()
+        today = self.now().date()
+        context = self.calendar_context
+        trading_day = context['is_trading_day'] if context and context['day'] == today else None
+        self.notifier.send_morning_greeting(trading_day)
 
     def _start_trades(self, strategy_id, day=None):
         """为启用账户启动独立交易任务，跳过仍在运行的账户。"""

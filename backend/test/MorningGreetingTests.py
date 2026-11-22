@@ -1,4 +1,4 @@
-"""验证交易日早安通知及其调度配置。"""
+"""验证每日早安通知及其调度配置。"""
 import json
 import unittest
 from datetime import date, datetime
@@ -18,13 +18,14 @@ class MorningGreetingTests(unittest.TestCase):
         self.clock.start()
         self.addCleanup(self.clock.stop)
 
-    def test_only_trading_days_send(self):
-        for context, expected in (({'day': self.today, 'is_trading_day': True}, 1),
-                                  ({'day': self.today, 'is_trading_day': False}, 0), (None, 0)):
-            with self.subTest(context=context), patch.object(self.scheduler, '_trading_day_context', return_value=context):
+    def test_every_day_sends_with_calendar_status(self):
+        for context, expected in (({'day': self.today, 'is_trading_day': True}, True),
+                                  ({'day': self.today, 'is_trading_day': False}, False), (None, None)):
+            with self.subTest(context=context):
                 self.scheduler.notifier.reset_mock()
+                self.scheduler.calendar_context = context
                 self.scheduler._send_morning_greeting()
-                self.assertEqual(self.scheduler.notifier.send_morning_greeting.call_count, expected)
+                self.scheduler.notifier.send_morning_greeting.assert_called_once_with(expected)
 
     def test_stopped_scheduler_does_not_send(self):
         self.scheduler.stop_event.set()
@@ -34,12 +35,22 @@ class MorningGreetingTests(unittest.TestCase):
     def test_message_addresses_owner(self):
         notifier = PushNotifier({'pushplus': {'token': 'test'}})
         notifier.client = Mock()
-        notifier.send_morning_greeting()
+        notifier.send_morning_greeting(True)
         title, body = notifier.client.send.call_args.args
         for text in ('主人', '交易日'):
             self.assertIn(text, title)
         for text in ('主人', '运行正常', '等待开盘', '财富自由'):
             self.assertIn(text, body)
+
+    def test_non_trading_and_unknown_messages(self):
+        notifier = PushNotifier({'pushplus': {'token': 'test'}})
+        notifier.client = Mock()
+        for status, expected in ((False, '休市'), (None, '无法确认')):
+            with self.subTest(status=status):
+                notifier.send_morning_greeting(status)
+                title, body = notifier.client.send.call_args.args
+                self.assertIn(expected, title + body)
+                self.assertNotIn('等待开盘', body)
 
     def test_configured_time_is_valid(self):
         config = Path(__file__).resolve().parents[1] / 'dev/market_trading_bot/config/global.json'
