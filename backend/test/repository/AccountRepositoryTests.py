@@ -146,7 +146,7 @@ class AccountRepositoryTests(TradeExecutorFixture, unittest.TestCase):
         task.market.reset_mock()
         task.strategy.reset_mock()
         second = task.trade()
-        task.market.load.assert_not_called()
+        task.market.get_market_snapshot.assert_not_called()
         task.strategy.calculate.assert_not_called()
         self.assertTrue(second['csv_exported'])
         self.assertEqual(first['fills'], second['fills'])
