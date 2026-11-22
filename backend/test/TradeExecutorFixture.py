@@ -31,7 +31,7 @@ class TradeExecutorFixture:
         strategy = Mock()
         strategy.calculate.return_value = signal
         market = Mock()
-        market.load.return_value = (signal.as_of, {})
+        market.get_market_snapshot.return_value = (signal.as_of, {})
         return TradingTask(strategy, market, executor or self.executor, repository or self.account_store,
                            strategy_id='etf_rotation', instance_id='TradeExecutor', initial_cash=initial_cash,
                            scheduled_at=signal.as_of, notifier=Mock())

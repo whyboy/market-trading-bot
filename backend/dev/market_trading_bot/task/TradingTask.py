@@ -83,7 +83,7 @@ class TradingTask:
         committed = self.account_store.get_execution(self.scheduled_at.date().isoformat())
         if committed is None:
             self.logger.info('获取行情 instance=%s', self.instance_id)
-            as_of, snapshots = self.market.load(self.strategy.symbols, self.strategy.history_points)
+            as_of, snapshots = self.market.get_market_snapshot(self.strategy.symbols, self.strategy.history_points)
             signal = self.strategy.calculate(snapshots, as_of)
             if signal.as_of.date() != self.scheduled_at.date():
                 raise ValueError('策略信号日期必须与任务计划日期一致')
