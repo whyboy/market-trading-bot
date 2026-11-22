@@ -16,7 +16,7 @@ DUE = datetime(2026, 11, 20, 14, 30, tzinfo=SHANGHAI)
 
 class TaskSchedulerTests(unittest.TestCase):
     def setUp(self):
-        sender = patch('market_trading_bot.notification.PushPlusClient.PushPlusClient.send', return_value='receipt')
+        sender = patch('market_trading_bot.notification.PushClient.PushClient.send', return_value='receipt')
         sender.start()
         self.addCleanup(sender.stop)
         self.temporary = tempfile.TemporaryDirectory()
@@ -46,6 +46,11 @@ class TaskSchedulerTests(unittest.TestCase):
     def prepare(self):
         self.current = DUE.replace(hour=9, minute=0)
         self.scheduler.prepare_calendar_context()
+
+    def test_morning_greeting_uses_configured_time(self):
+        trigger = self.scheduler.timer.get_job('_morning_greeting').trigger
+        self.assertEqual(trigger.get_next_fire_time(None, self.current),
+                         (self.current + timedelta(days=1)).replace(hour=0, minute=21))
 
     def test_daily_calendar_trigger_is_nine_am(self):
         trigger = self.scheduler.timer.get_job('_calendar').trigger
