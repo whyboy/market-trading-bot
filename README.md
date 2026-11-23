@@ -8,7 +8,15 @@ ETF 动量轮动程序，启动后按配置的时间定时模拟调仓，并提�
 
 ## 策略简介
 
-默认每天北京时间 **14:30 自动模拟调仓**，**15:05 估值**，**15:15 推送日报**，时间均可配置。非交易时段及休市日使用最近已完成交易日的收盘价模拟交易。
+每日任务按北京时间依次执行：
+
+- **08:50** 更新交易日历
+- **09:00** 发送早安通知
+- **14:30** 执行模拟调仓
+- **15:05** 计算账户资产和收益
+- **15:10** 推送每日收益报告
+
+以上时间均可配置。非交易时段及休市日使用最近已完成交易日的收盘价模拟交易。
 
 策略每天对 ETF 池计算动量和波动率：用最近 24 个交易日收盘价加当前价做回归，以“年化收益 × 拟合优度”作为动量得分，选择得分最高的 ETF；再按“15% 目标年化波动率 ÷ 标的波动率”确定仓位，最高 100%。执行时按调仓前净资产计算目标数量，先卖后买，并应用交易单位、T+1、佣金、滑点和现金约束。
 
@@ -88,7 +96,7 @@ backend/.venv/bin/python backend/main.py
 | `market` | 行情源、请求超时与间隔、报价最大延迟、历史回溯天数 |
 | `storage.data_dir` | SQLite 账本与 CSV 目录 |
 | `logging` | 日志目录、级别、保留日期数和统一输出格式 |
-| `schedule.calendar_time` / `schedule.valuation_time` | 必填；每日准备交易日历和估值的北京时间，配置示例为 `09:00` / `15:05` |
+| `schedule.calendar_time` / `schedule.morning_notification_time` / `schedule.valuation_time` | 必填；每日准备交易日历、发送早安通知和估值的北京时间，配置示例为 `08:50` / `09:00` / `15:05` |
 | `runtime.trade_timeout_seconds` | 交易执行超时阈值，默认 300 秒，仅标记异常 |
 | `pushplus.token` | PushPlus 消息 Token，报告生成后直接发送 |
 
@@ -106,8 +114,16 @@ backend/.venv/bin/python backend/main.py
 | `parameters.annualization_days` | `250` | 年化交易日数量 |
 | `parameters.select_num` | `1` | 选择排名第一的 ETF |
 | `instruments` | 每手 100 份；黄金 ETF、纳指 ETF 为 T+0，创业板 ETF、上证 180 ETF 为 T+1 | 交易单位和卖出规则 |
-| `schedule.trade_time` | `14:30` | 北京时间自动调仓时间 |
-| `schedule.report_time` | `15:15` | 每日收益报告时间 |
+
+每日调度按北京时间执行，配置项按执行顺序如下：
+
+| 时间 | 配置文件 | 配置项 | 用途 |
+|---|---|---|---|
+| `08:50` | `global.json` | `schedule.calendar_time` | 准备交易日历 |
+| `09:00` | `global.json` | `schedule.morning_notification_time` | 发送早安通知；未配置时默认为 `09:00` |
+| `14:30` | `etf_rotation_strategy.json` | `schedule.trade_time` | 执行模拟调仓 |
+| `15:05` | `global.json` | `schedule.valuation_time` | 计算账户资产和收益 |
+| `15:10` | `etf_rotation_strategy.json` | `schedule.report_time` | 发送每日收益报告 |
 
 `initial_cash` 仅在首次开户时使用并保存到账本；后续修改配置不会改变账户基准。PushPlus Token 配置在 `global.json` 的 `pushplus.token` 中。
 
