@@ -55,4 +55,4 @@ class MorningGreetingTests(unittest.TestCase):
     def test_configured_time_is_valid(self):
         config = Path(__file__).resolve().parents[1] / 'dev/market_trading_bot/config/global.json'
         schedule = json.loads(config.read_text())['schedule']
-        self.assertEqual(schedule['morning_notification_time'], '09:00')
+        self.assertEqual(schedule['morning_notification_time'], '08:00')

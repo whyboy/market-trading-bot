@@ -10,8 +10,8 @@ ETF 动量轮动程序，启动后按配置的时间定时模拟调仓，并提�
 
 每日任务按北京时间依次执行：
 
-- **08:50** 更新交易日历
-- **09:00** 发送早安通知
+- **07:50** 更新交易日历
+- **08:00** 发送早安通知
 - **14:30** 执行模拟调仓
 - **15:05** 计算账户资产和收益
 - **15:10** 推送每日收益报告
@@ -96,7 +96,7 @@ backend/.venv/bin/python backend/main.py
 | `market` | 行情源、请求超时与间隔、报价最大延迟、历史回溯天数 |
 | `storage.data_dir` | SQLite 账本与 CSV 目录 |
 | `logging` | 日志目录、级别、保留日期数和统一输出格式 |
-| `schedule.calendar_time` / `schedule.morning_notification_time` / `schedule.valuation_time` | 必填；每日准备交易日历、发送早安通知和估值的北京时间，配置示例为 `08:50` / `09:00` / `15:05` |
+| `schedule.calendar_time` / `schedule.morning_notification_time` / `schedule.valuation_time` | 必填；每日准备交易日历、发送早安通知和估值的北京时间，配置示例为 `07:50` / `08:00` / `15:05` |
 | `runtime.trade_timeout_seconds` | 交易执行超时阈值，默认 300 秒，仅标记异常 |
 | `pushplus.token` | PushPlus 消息 Token，报告生成后直接发送 |
 
@@ -119,8 +119,8 @@ backend/.venv/bin/python backend/main.py
 
 | 时间 | 配置文件 | 配置项 | 用途 |
 |---|---|---|---|
-| `08:50` | `global.json` | `schedule.calendar_time` | 准备交易日历 |
-| `09:00` | `global.json` | `schedule.morning_notification_time` | 发送早安通知；未配置时默认为 `09:00` |
+| `07:50` | `global.json` | `schedule.calendar_time` | 准备交易日历 |
+| `08:00` | `global.json` | `schedule.morning_notification_time` | 发送早安通知；未配置时默认为 `08:00` |
 | `14:30` | `etf_rotation_strategy.json` | `schedule.trade_time` | 执行模拟调仓 |
 | `15:05` | `global.json` | `schedule.valuation_time` | 计算账户资产和收益 |
 | `15:10` | `etf_rotation_strategy.json` | `schedule.report_time` | 发送每日收益报告 |

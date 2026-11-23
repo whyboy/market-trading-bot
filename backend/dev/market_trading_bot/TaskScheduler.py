@@ -82,7 +82,7 @@ class TaskScheduler:
             schedule = self.settings['schedule']
             calendar_time = time.fromisoformat(schedule['calendar_time'])
             valuation_time = time.fromisoformat(schedule['valuation_time'])
-            morning_time = time.fromisoformat(schedule.get('morning_notification_time', '09:00'))
+            morning_time = time.fromisoformat(schedule.get('morning_notification_time', '08:00'))
             self.timer.add_job(self.prepare_calendar_context, 'cron', hour=calendar_time.hour,
                                minute=calendar_time.minute, second=calendar_time.second, id='_calendar',
                                coalesce=True, max_instances=1, misfire_grace_time=300)

@@ -48,13 +48,15 @@ class TaskSchedulerTests(unittest.TestCase):
         self.scheduler.prepare_calendar_context()
 
     def test_morning_greeting_uses_configured_time(self):
+        self.current = DUE.replace(hour=7, minute=0)
         trigger = self.scheduler.timer.get_job('_morning_greeting').trigger
         self.assertEqual(trigger.get_next_fire_time(None, self.current),
-                         self.current.replace(hour=9, minute=0))
+                         self.current.replace(hour=8, minute=0))
 
-    def test_daily_calendar_trigger_is_eight_fifty(self):
+    def test_daily_calendar_trigger_is_seven_fifty(self):
+        self.current = DUE.replace(hour=7, minute=0)
         trigger = self.scheduler.timer.get_job('_calendar').trigger
-        morning = DUE.replace(hour=8, minute=50)
+        morning = DUE.replace(hour=7, minute=50)
         self.assertEqual(trigger.get_next_fire_time(None, self.current), morning)
         self.assertEqual(trigger.get_next_fire_time(morning, morning + timedelta(seconds=1)), morning + timedelta(days=1))
         self.assertEqual(self.scheduler.tasks, {})
