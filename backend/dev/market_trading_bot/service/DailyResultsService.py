@@ -40,6 +40,20 @@ class DailyResultsService:
             DailyResultsRepository.set_valuation_status(connection, (day, status, error, datetime.now(timezone.utc).isoformat()))
 
     @staticmethod
+    def get_all_daily_results(directory, instance_id):
+        """只读查询账户每日结果表的所有记录。"""
+        if not re.fullmatch(r'[A-Za-z0-9_-]+', instance_id):
+            raise ValueError('实例ID只能包含字母、数字、下划线及连字符')
+        database = directory / instance_id / 'ledger.sqlite3'
+        if not database.exists():
+            return []
+        with closing(sqlite3.connect(f'{database.resolve().as_uri()}?mode=ro', uri=True)) as connection:
+            if not DailyResultsRepository.table_exists(connection).fetchone():
+                return []
+            connection.row_factory = sqlite3.Row
+            return [dict(row) for row in DailyResultsRepository.all_daily_results(connection)]
+
+    @staticmethod
     def get_daily_result(directory, instance_id, day):
         """只读查询 day 当天的交易、估值和状态；无记录返回 None。"""
         if not re.fullmatch(r'[A-Za-z0-9_-]+', instance_id):

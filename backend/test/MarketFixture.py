@@ -45,6 +45,6 @@ class MarketFixture:
                 patch.object(MarketProvider, 'get_daily_closes', return_value=self.daily), \
                 patch('market_trading_bot.market.source.HttpMarket.requests.get', return_value=response):
             clock.now.return_value = NOW
-            result = MarketProvider(self.settings).load(
+            result = MarketProvider(self.settings).get_market_snapshot(
                 self.strategy.symbols if symbols is None else symbols, self.strategy.history_points)
             return result

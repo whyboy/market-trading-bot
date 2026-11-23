@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from datetime import datetime
 from market_trading_bot.market.MarketProvider import SHANGHAI
-from market_trading_bot.notification.PushPlusClient import PushPlusClient
-from market_trading_bot.notification.PushPlusNotifier import PushPlusNotifier
+from market_trading_bot.notification.PushClient import PushClient
+from market_trading_bot.notification.PushNotifier import PushNotifier
 from market_trading_bot.notification.report.TradeExecutionReport import TradeExecutionReport
 from market_trading_bot.task.TradingTask import TradingTask
 from pathlib import Path
@@ -32,7 +32,7 @@ class PushPlusTests(unittest.TestCase):
                                                get_latest_account=lambda *args: {'initial_cash': '100000'}))
 
     def test_no_fills_still_sends_report_directly(self):
-        notifier = PushPlusNotifier(self.settings)
+        notifier = PushNotifier(self.settings)
         title, content = TradeExecutionReport.build(self.task())
         self.assertIn('今日无调仓', content)
         self.assertIn('+2.35%', content)
@@ -51,10 +51,10 @@ class PushPlusTests(unittest.TestCase):
         self.assertNotIn('secret-token', content)
 
     def test_client_checks_application_code_and_hides_response(self):
-        client = PushPlusClient('test-secret')
-        with patch('market_trading_bot.notification.PushPlusClient.requests.post', return_value=Mock(
+        client = PushClient('test-secret')
+        with patch('market_trading_bot.notification.PushClient.requests.post', return_value=Mock(
                 status_code=200, json=lambda: {'code': 903, 'msg': 'test-secret'})) as post:
-            with self.assertRaises(PushPlusClient.Error) as error:
+            with self.assertRaises(PushClient.Error) as error:
                 client.send('title', 'content')
         post.assert_called_once()
         self.assertNotIn('test-secret', str(error.exception))
@@ -62,13 +62,13 @@ class PushPlusTests(unittest.TestCase):
         self.assertEqual(post.call_args.kwargs['timeout'], (3, 10))
 
     def test_notification_failure_does_not_change_successful_trade(self):
-        notifier = PushPlusNotifier(self.settings)
+        notifier = PushNotifier(self.settings)
         task = TradingTask(Mock(), Mock(), Mock(), Mock(), strategy_id='example',
                            instance_id='TradeExecutor', initial_cash=100000,
                            scheduled_at=datetime(2026, 11, 20, 14, 30, tzinfo=SHANGHAI), notifier=notifier)
         with patch.object(task, 'trade', return_value={'fills': []}) as trade:
             with patch.object(TradeExecutionReport, 'build', return_value=('title', 'content')):
-                with patch.object(notifier.client, 'send', side_effect=PushPlusClient.Error('network')) as send:
+                with patch.object(notifier.client, 'send', side_effect=PushClient.Error('network')) as send:
                     task.start()
                     task.thread.join(timeout=3)
         self.assertFalse(task.thread.is_alive())
@@ -77,7 +77,7 @@ class PushPlusTests(unittest.TestCase):
         send.assert_called_once()
 
     def test_failed_trade_sends_failure_report(self):
-        notifier = PushPlusNotifier(self.settings)
+        notifier = PushNotifier(self.settings)
         task = TradingTask(Mock(), Mock(), Mock(), Mock(), strategy_id='example',
                            instance_id='TradeExecutor', initial_cash=100000,
                            scheduled_at=datetime(2026, 11, 20, 14, 30, tzinfo=SHANGHAI), notifier=notifier)
@@ -102,20 +102,20 @@ class PushPlusTests(unittest.TestCase):
 
     def test_network_failure_retries_then_succeeds(self):
         response = Mock(status_code=200, json=lambda: {'code': 200, 'data': 'receipt'})
-        with patch('market_trading_bot.notification.PushPlusClient.requests.post',
+        with patch('market_trading_bot.notification.PushClient.requests.post',
                    side_effect=[requests.Timeout('secret'), requests.ConnectionError('secret'), response]) as post:
-            with patch('market_trading_bot.notification.PushPlusClient.time.sleep') as sleep:
-                receipt = PushPlusClient('test-secret').send('title', 'content')
+            with patch('market_trading_bot.notification.PushClient.time.sleep') as sleep:
+                receipt = PushClient('test-secret').send('title', 'content')
         self.assertEqual(receipt, 'receipt')
         self.assertEqual(post.call_count, 3)
         self.assertEqual(sleep.call_args_list, [call(1), call(2)])
 
     def test_network_failure_stops_after_three_attempts(self):
-        with patch('market_trading_bot.notification.PushPlusClient.requests.post',
+        with patch('market_trading_bot.notification.PushClient.requests.post',
                    side_effect=requests.Timeout('test-secret')) as post:
-            with patch('market_trading_bot.notification.PushPlusClient.time.sleep') as sleep:
-                with self.assertRaises(PushPlusClient.Error) as error:
-                    PushPlusClient('test-secret').send('title', 'content')
+            with patch('market_trading_bot.notification.PushClient.time.sleep') as sleep:
+                with self.assertRaises(PushClient.Error) as error:
+                    PushClient('test-secret').send('title', 'content')
         self.assertEqual(post.call_count, 3)
         self.assertEqual(sleep.call_count, 2)
         self.assertNotIn('test-secret', str(error.exception))
@@ -123,17 +123,17 @@ class PushPlusTests(unittest.TestCase):
     def test_temporary_service_errors_retry_and_permanent_http_errors_do_not(self):
         for status, code, attempts in ((503, 0, 3), (429, 0, 3), (200, 500, 3), (403, 0, 1)):
             with self.subTest(status=status, code=code):
-                with patch('market_trading_bot.notification.PushPlusClient.requests.post',
+                with patch('market_trading_bot.notification.PushClient.requests.post',
                            return_value=Mock(status_code=status, json=lambda: {'code': code})) as post:
-                    with patch('market_trading_bot.notification.PushPlusClient.time.sleep'):
-                        with self.assertRaises(PushPlusClient.Error):
-                            PushPlusClient('test-secret').send('title', 'content')
+                    with patch('market_trading_bot.notification.PushClient.time.sleep'):
+                        with self.assertRaises(PushClient.Error):
+                            PushClient('test-secret').send('title', 'content')
                 self.assertEqual(post.call_count, attempts)
 
     def test_success_does_not_retry(self):
-        with patch('market_trading_bot.notification.PushPlusClient.requests.post',
+        with patch('market_trading_bot.notification.PushClient.requests.post',
                    return_value=Mock(status_code=200, json=lambda: {'code': 200, 'data': 'receipt'})) as post:
-            with patch('market_trading_bot.notification.PushPlusClient.time.sleep') as sleep:
-                self.assertEqual(PushPlusClient('test-secret').send('title', 'content'), 'receipt')
+            with patch('market_trading_bot.notification.PushClient.time.sleep') as sleep:
+                self.assertEqual(PushClient('test-secret').send('title', 'content'), 'receipt')
         post.assert_called_once()
         sleep.assert_not_called()

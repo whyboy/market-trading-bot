@@ -37,21 +37,95 @@ class MarketProvider:
         self.baostock = BaoStockDaily(timeout)
         self.http = HttpMarket(timeout)
 
-    def get_quotes(self, symbols, now, max_age):
-        errors = []
-        for provider in ('tencent', 'sina'):
-            try:
-                quotes = self.http.get_quotes(symbols, provider)
-                observed_at = now()
-                for price, quoted_at in quotes.values():
-                    age = (observed_at - quoted_at).total_seconds()
-                    if not math.isfinite(price) or price <= 0 or quoted_at.date() != observed_at.date() or not 0 <= age <= max_age:
-                        raise ValueError('报价价格无效或时间过期')
-                return quotes
-            except Exception as exc:
-                errors.append(f'{provider}: {exc}')
-                self.logger.warning('报价源失败 provider=%s error=%s', provider, exc)
-        raise ValueError('所有报价源失败: ' + '; '.join(errors))
+    @staticmethod
+    def _is_trading_session(as_of: datetime):
+        """判断是否处于 A 股连续交易时段。"""
+        return time(9, 30) <= as_of.time() <= time(11, 30) or time(13) <= as_of.time() < time(15)
+
+    @staticmethod
+    def _check_trading_session(as_of: datetime):
+        if not MarketProvider._is_trading_session(as_of):
+            raise MarketDataError('行情获取期间已离开 A 股连续交易时段')
+
+    def get_market_snapshot(self, symbols: tuple[str, ...], history_points: int) -> tuple[datetime, dict[str, MarketData]]:
+        """加载连续历史收盘价及当日报价，校验交易时段、日期和价格。"""
+        started_at = datetime.now(SHANGHAI)
+        started_monotonic = clock.monotonic()
+        self.logger.info('行情获取开始 symbols=%s history_points=%d', ','.join(symbols), history_points)
+        try:
+            self.logger.info('交易日历获取开始')
+            calendar = self.trading_calendar()
+            if not calendar or not calendar[0] <= started_at.date() <= calendar[-1]:
+                raise MarketDataError('交易日历未覆盖当前日期')
+            self.logger.info('交易日历获取成功 date=%s coverage=%s~%s', started_at.date(), calendar[0], calendar[-1])
+            if started_at.date() not in calendar or not self._is_trading_session(started_at):
+                as_of, snapshots = self._load_close_snapshots(symbols, history_points, started_at, calendar)
+                self.logger.info('行情获取成功 mode=close count=%d as_of=%s elapsed_seconds=%.2f',
+                                 len(snapshots), as_of.isoformat(), clock.monotonic() - started_monotonic)
+                return as_of, snapshots
+            for symbol in symbols:
+                if not re.fullmatch(r'\d{6}\.(XSHG|XSHE)', symbol):
+                    raise MarketDataError(f'不支持的证券代码: {symbol}')
+            trading_days = [day for day in calendar if day < started_at.date()][-history_points:]
+            if len(trading_days) != history_points:
+                raise MarketDataError('交易日历历史不足')
+            histories = self._load_daily_closes(symbols, trading_days, started_at.date())
+            # 历史加载后批量取价，减少报价时间差。
+            self.logger.info('批量当前报价请求开始 count=%d', len(symbols))
+            quotes = self._request(self.get_quotes, symbols=symbols, now=lambda: datetime.now(SHANGHAI), max_age=self.max_quote_age)
+            as_of = datetime.now(SHANGHAI)
+            self._check_trading_session(as_of)
+            if as_of.date() != started_at.date():
+                raise MarketDataError('行情获取跨交易日，停止计算')
+            snapshots = {}
+            for symbol in symbols:
+                price, quoted_at = quotes[symbol]
+                self.logger.info('当前报价获取结果 symbol=%s price=%s quote_time=%s', symbol, price, quoted_at.isoformat())
+                age = (as_of - quoted_at).total_seconds()
+                if quoted_at.date() != as_of.date() or not 0 <= age <= self.max_quote_age:
+                    raise MarketDataError(f'{symbol}: 报价过期或来自未来，更新时间为{quoted_at.isoformat()}')
+                history = histories[symbol]
+                if not math.isfinite(price) or price <= 0:
+                    raise MarketDataError(f'{symbol}: 价格无效')
+                snapshots[symbol] = MarketData(symbol, quoted_at, price, history)
+            self.logger.info('行情获取成功 mode=quote count=%d as_of=%s elapsed_seconds=%.2f',
+                             len(snapshots), as_of.isoformat(), clock.monotonic() - started_monotonic)
+            return as_of, snapshots
+        except MarketDataError as exc:
+            self.logger.error('行情获取失败: %s', exc)
+            raise
+        except Exception as exc:
+            self.logger.error('行情接口请求或解析失败: %s', exc)
+            raise MarketDataError(f'行情获取失败: {exc}') from exc
+
+    def trading_calendar(self):
+        """获取完整交易日历，沿用行情请求超时和间隔配置。"""
+        return sorted(set(self._request(ak.calendar_trade_date_hist_sina)['trade_date']))
+
+    def get_daily_candles(self, symbol, start, end):
+        """获取前复权日 K 线。"""
+        return self._request(self.http.get_daily_candles, symbol=symbol, start=start, end=end)
+
+    def closing_prices(self, symbols, day):
+        """查询 day 当天的不复权收盘价，返回 symbol 到 Decimal 的映射。"""
+        prices = {}
+        for symbol in sorted(symbols):
+            if not re.fullmatch(r'\d{6}\.(XSHG|XSHE)', symbol):
+                raise MarketDataError(f'不支持的证券代码: {symbol}')
+            self.logger.info('收盘价获取开始 symbol=%s date=%s', symbol, day)
+            daily = self._request(self.get_daily_closes, symbol=symbol, start=day.isoformat(),
+                                  end=day.isoformat(), adjust='', required_days=[day])
+            if daily.empty:
+                raise MarketDataError(f'{symbol}: {day} 收盘价尚未更新')
+            dates = pd.to_datetime(daily['日期'], errors='raise').dt.date
+            if len(daily) != 1 or dates.iloc[0] != day:
+                raise MarketDataError(f'{symbol}: 收盘价日期错误或重复')
+            price = Decimal(str(daily.iloc[0]['收盘']))
+            if not price.is_finite() or price <= 0:
+                raise MarketDataError(f'{symbol}: 收盘价无效')
+            prices[symbol] = price
+            self.logger.info('收盘价获取成功 symbol=%s date=%s price=%s', symbol, day, price)
+        return prices
 
     def get_daily_closes(self, symbol, start, end, adjust, required_days=None):
         if adjust not in ('', 'qfq'):
@@ -78,109 +152,21 @@ class MarketProvider:
                 self.logger.warning('日线源失败 provider=%s symbol=%s error=%s', name, symbol, exc)
         raise ValueError(f'{symbol}: 所有日线源失败: ' + '; '.join(errors))
 
-    def load(self, symbols: tuple[str, ...], history_points: int) -> tuple[datetime, dict[str, MarketData]]:
-        """加载连续历史收盘价及当日报价，校验交易时段、日期和价格。"""
-        started_at = datetime.now(SHANGHAI)
-        self.logger.info('行情获取开始 daily=baostock,tencent quotes=tencent,sina symbols=%s', ','.join(symbols))
-        try:
-            calendar = self.trading_calendar()
-            if not calendar or not calendar[0] <= started_at.date() <= calendar[-1]:
-                raise MarketDataError('交易日历未覆盖当前日期')
-            if started_at.date() not in calendar or not self._is_trading_session(started_at):
-                return self._load_close_snapshots(symbols, history_points, started_at, calendar)
-            for symbol in symbols:
-                if not re.fullmatch(r'\d{6}\.(XSHG|XSHE)', symbol):
-                    raise MarketDataError(f'不支持的证券代码: {symbol}')
-            self.logger.info('交易日历获取成功 date=%s coverage=%s~%s', started_at.date(), calendar[0], calendar[-1])
-            trading_days = [day for day in calendar if day < started_at.date()][-history_points:]
-            if len(trading_days) != history_points:
-                raise MarketDataError('交易日历历史不足')
-            histories = self._load_daily_closes(symbols, trading_days, started_at.date())
-            # 历史加载后批量取价，减少报价时间差。
-            self.logger.info('批量当前报价请求开始 count=%d', len(symbols))
-            quotes = self._request(self.get_quotes, symbols=symbols, now=lambda: datetime.now(SHANGHAI), max_age=self.max_quote_age)
-            as_of = datetime.now(SHANGHAI)
-            self._check_trading_session(as_of)
-            if as_of.date() != started_at.date():
-                raise MarketDataError('行情获取跨交易日，停止计算')
-            snapshots = {}
-            for symbol in symbols:
-                price, quoted_at = quotes[symbol]
-                self.logger.info('当前报价获取结果 symbol=%s price=%s quote_time=%s', symbol, price, quoted_at.isoformat())
-                age = (as_of - quoted_at).total_seconds()
-                if quoted_at.date() != as_of.date() or not 0 <= age <= self.max_quote_age:
-                    raise MarketDataError(f'{symbol}: 报价过期或来自未来，更新时间为{quoted_at.isoformat()}')
-                history = histories[symbol]
-                if not math.isfinite(price) or price <= 0:
-                    raise MarketDataError(f'{symbol}: 价格无效')
-                snapshots[symbol] = MarketData(symbol, quoted_at, price, history)
-            self.logger.info('行情获取成功 count=%d as_of=%s', len(snapshots), as_of.isoformat())
-            return as_of, snapshots
-        except MarketDataError as exc:
-            self.logger.error('行情获取失败: %s', exc)
-            raise
-        except Exception as exc:
-            self.logger.error('行情接口请求或解析失败: %s', exc)
-            raise MarketDataError(f'行情获取失败: {exc}') from exc
-
-    def closing_prices(self, symbols, day):
-        """查询 day 当天的不复权收盘价，返回 symbol 到 Decimal 的映射。"""
-        prices = {}
-        for symbol in sorted(symbols):
-            if not re.fullmatch(r'\d{6}\.(XSHG|XSHE)', symbol):
-                raise MarketDataError(f'不支持的证券代码: {symbol}')
-            daily = self._request(self.get_daily_closes, symbol=symbol, start=day.isoformat(),
-                                  end=day.isoformat(), adjust='', required_days=[day])
-            if daily.empty:
-                raise MarketDataError(f'{symbol}: {day} 收盘价尚未更新')
-            dates = pd.to_datetime(daily['日期'], errors='raise').dt.date
-            if len(daily) != 1 or dates.iloc[0] != day:
-                raise MarketDataError(f'{symbol}: 收盘价日期错误或重复')
-            price = Decimal(str(daily.iloc[0]['收盘']))
-            if not price.is_finite() or price <= 0:
-                raise MarketDataError(f'{symbol}: 收盘价无效')
-            prices[symbol] = price
-        return prices
-
-    def trading_calendar(self):
-        """获取完整交易日历，沿用行情请求超时和间隔配置。"""
-        return sorted(set(self._request(ak.calendar_trade_date_hist_sina)['trade_date']))
-
-    @staticmethod
-    def _is_trading_session(as_of: datetime):
-        """判断是否处于 A 股连续交易时段。"""
-        return time(9, 30) <= as_of.time() <= time(11, 30) or time(13) <= as_of.time() < time(15)
-
-    @staticmethod
-    def _check_trading_session(as_of: datetime):
-        if not MarketProvider._is_trading_session(as_of):
-            raise MarketDataError('行情获取期间已离开 A 股连续交易时段')
-
-    def _load_daily_closes(self, symbols, trading_days, before_day):
-        """读取 before_day 之前的前复权收盘价，校验交易日和价格。"""
-        start_date = (before_day - timedelta(days=self.lookback_days)).isoformat()
-        end_date = (before_day - timedelta(days=1)).isoformat()
-        histories = {}
-        for symbol in symbols:
-            daily = self._request(self.get_daily_closes,
-                symbol=symbol, start=start_date, end=end_date, adjust='qfq', required_days=trading_days)
-            self.logger.info('历史日线获取结果 symbol=%s rows=%d window_days=%d', symbol, len(daily), self.lookback_days)
-            if daily.empty:
-                raise MarketDataError(f'{symbol}: 无历史行情')
-            dates = pd.to_datetime(daily['日期'], errors='raise').dt.date
-            daily = daily.assign(day=dates).sort_values('day')
-            daily = daily[daily['day'] < before_day]
-            if daily['day'].duplicated().any():
-                raise MarketDataError(f'{symbol}: 历史日期重复')
-            daily = daily.tail(len(trading_days))
-            if daily['day'].tolist() != trading_days:
-                raise MarketDataError(f'{symbol}: 历史行情不足或缺少交易日，请检查回溯窗口及数据源')
-            self.logger.info('历史日线校验成功 symbol=%s used=%d start=%s end=%s', symbol, len(daily), daily.iloc[0]['day'], daily.iloc[-1]['day'])
-            history = tuple(DailyClose(row.day, float(row.收盘)) for row in daily.itertuples())
-            if any(not math.isfinite(bar.close) or bar.close <= 0 for bar in history):
-                raise MarketDataError(f'{symbol}: 价格无效')
-            histories[symbol] = history
-        return histories
+    def get_quotes(self, symbols, now, max_age):
+        errors = []
+        for provider in ('tencent', 'sina'):
+            try:
+                quotes = self.http.get_quotes(symbols, provider)
+                observed_at = now()
+                for price, quoted_at in quotes.values():
+                    age = (observed_at - quoted_at).total_seconds()
+                    if not math.isfinite(price) or price <= 0 or quoted_at.date() != observed_at.date() or not 0 <= age <= max_age:
+                        raise ValueError('报价价格无效或时间过期')
+                return quotes
+            except Exception as exc:
+                errors.append(f'{provider}: {exc}')
+                self.logger.warning('报价源失败 provider=%s error=%s', provider, exc)
+        raise ValueError('所有报价源失败: ' + '; '.join(errors))
 
     def _load_close_snapshots(self, symbols, history_points, as_of, calendar):
         """使用最近已完成交易日收盘数据，按当前日期模拟执行。"""
@@ -191,6 +177,7 @@ class MarketProvider:
         if len(completed_days) <= history_points:
             raise MarketDataError('交易日历历史不足')
         close_day = completed_days[-1]
+        self.logger.info('非交易时段使用收盘价 execution_time=%s quote_date=%s', as_of.isoformat(), close_day)
         trading_days = completed_days[-history_points - 1:-1]
         prices = self.closing_prices(symbols, close_day)
         histories = self._load_daily_closes(symbols, trading_days, close_day)
@@ -198,10 +185,37 @@ class MarketProvider:
         if finished_at.date() != as_of.date():
             raise MarketDataError('行情获取跨日期，停止计算')
         quoted_at = datetime.combine(close_day, time(15), SHANGHAI)
-        self.logger.info('非交易时段使用收盘价：执行时间=%s 行情日期=%s', as_of.isoformat(), close_day)
         snapshots = {symbol: MarketData(symbol, quoted_at, float(prices[symbol]), histories[symbol])
                      for symbol in symbols}
         return finished_at, snapshots
+
+    def _load_daily_closes(self, symbols, trading_days, before_day):
+        """读取 before_day 之前的前复权收盘价，校验交易日和价格。"""
+        start_date = (before_day - timedelta(days=self.lookback_days)).isoformat()
+        end_date = (before_day - timedelta(days=1)).isoformat()
+        histories = {}
+        for symbol in symbols:
+            self.logger.info('历史日线获取开始 symbol=%s start=%s end=%s', symbol, start_date, end_date)
+            daily = self._request(self.get_daily_closes,
+                symbol=symbol, start=start_date, end=end_date, adjust='qfq', required_days=trading_days)
+            fetched_rows = len(daily)
+            if daily.empty:
+                raise MarketDataError(f'{symbol}: 无历史行情')
+            dates = pd.to_datetime(daily['日期'], errors='raise').dt.date
+            daily = daily.assign(day=dates).sort_values('day')
+            daily = daily[daily['day'] < before_day]
+            if daily['day'].duplicated().any():
+                raise MarketDataError(f'{symbol}: 历史日期重复')
+            daily = daily.tail(len(trading_days))
+            if daily['day'].tolist() != trading_days:
+                raise MarketDataError(f'{symbol}: 历史行情不足或缺少交易日，请检查回溯窗口及数据源')
+            history = tuple(DailyClose(row.day, float(row.收盘)) for row in daily.itertuples())
+            if any(not math.isfinite(bar.close) or bar.close <= 0 for bar in history):
+                raise MarketDataError(f'{symbol}: 价格无效')
+            self.logger.info('历史日线校验成功 symbol=%s rows=%d used=%d start=%s end=%s',
+                             symbol, fetched_rows, len(daily), daily.iloc[0]['day'], daily.iloc[-1]['day'])
+            histories[symbol] = history
+        return histories
 
     def _request(self, function, **kwargs):
         """按配置限制请求间隔。"""

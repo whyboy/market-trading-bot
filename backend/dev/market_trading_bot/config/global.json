@@ -16,13 +16,15 @@
   "logging": {
     "directory": "logs",
     "retention_dates": 30,
-    "level": "INFO"
+    "level": "INFO",
+    "format": "%(asctime)s %(levelname)s %(message)s",
+    "date_format": "%Y-%m-%d %H:%M:%S (UTC+8)"
   },
   "runtime": {
     "trade_timeout_seconds": 300
   },
   "schedule": {
-    "calendar_time": "02:08",
-    "valuation_time": "02:15"
+    "calendar_time": "00:05",
+    "valuation_time": "00:10"
   }
 }

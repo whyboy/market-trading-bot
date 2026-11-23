@@ -5,11 +5,13 @@ import logging
 import threading
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime, time, timezone
+from market_trading_bot.log.LoggingConfig import configure_logging
 from market_trading_bot.log.StrategyLogger import strategy_logging
 from market_trading_bot.market.MarketProvider import MarketProvider, SHANGHAI
-from market_trading_bot.notification.PushPlusNotifier import PushPlusNotifier
+from market_trading_bot.notification.PushNotifier import PushNotifier
 from market_trading_bot.service.AccountService import AccountService
 from market_trading_bot.strategy.ETFRotationStrategyImpl import ETFRotationStrategyImpl
+from market_trading_bot.task.CandleRefreshTask import CandleRefreshTask
 from market_trading_bot.task.DailySummaryTask import DailySummaryTask
 from market_trading_bot.task.DailyValuationTask import DailyValuationTask
 from market_trading_bot.task.TradingTask import TradingTask
@@ -55,6 +57,7 @@ class TaskScheduler:
     def start(self):
         """取得部署锁并注册定时任务；晚启动补做当天日历、估值和日报。"""
         self.settings = json.loads((self.root / 'market_trading_bot/config/global.json').read_text())
+        configure_logging(self.settings['logging'])
         directory = self.root / self.settings['storage']['data_dir'] / 'runtime'
         directory.mkdir(parents=True, exist_ok=True)
         self.lock_file = (directory / 'scheduler.lock').open('a')
@@ -65,7 +68,7 @@ class TaskScheduler:
             self.lock_file = None
             raise RuntimeError('已有调度服务运行，请只启动一个后端实例') from None
         try:
-            self.notifier = PushPlusNotifier(self.settings)
+            self.notifier = PushNotifier(self.settings)
             for path in sorted((self.root / 'market_trading_bot/config').glob('*_strategy.json')):
                 config = json.loads(path.read_text())
                 if config.get('enable', True):
@@ -93,6 +96,10 @@ class TaskScheduler:
                                    coalesce=True, max_instances=1, misfire_grace_time=None)
             # 每 5 秒更新服务心跳。
             self.timer.add_job(self._heartbeat, 'interval', seconds=5, id='_heartbeat')
+            # 启动时立即刷新日 K 线，此后每 5 分钟刷新，跳过重叠执行并合并错过的调度。
+            self.candle_task = CandleRefreshTask(self.settings, self.configs)
+            self.timer.add_job(self.candle_task.run, 'interval', minutes=5, next_run_time=self.now(),
+                               id='_candles', coalesce=True, max_instances=1)
             self.timer.start()
             # 启动时先准备当天日历；晚于收盘估值时间启动时补做估值和日报。
             self.prepare_calendar_context()

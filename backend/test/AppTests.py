@@ -54,6 +54,24 @@ class AppTests(unittest.TestCase):
         self.assertFalse((self.root / 'data').exists())
         self.assertEqual(self.client.get('/api/accounts/unknown').status_code, 404)
 
+    def test_daily_results_are_read_only_and_scoped_to_account(self):
+        url = '/api/accounts/example_pap/daily-results'
+        self.assertEqual(self.client.get(url).json(), [])
+        self.assertFalse((self.root / 'data').exists())
+        self.assertEqual(self.client.get('/api/accounts/unknown/daily-results').status_code, 404)
+        database = self.root / 'data/example_pap/ledger.sqlite3'
+        database.parent.mkdir(parents=True)
+        with closing(sqlite3.connect(database)) as connection, connection:
+            connection.execute("CREATE TABLE daily_results(day TEXT, execution_payload TEXT, valuation_payload TEXT, valuation_status TEXT, valuation_error TEXT, updated_at TEXT)")
+            connection.execute("INSERT INTO daily_results VALUES (?, ?, ?, ?, ?, ?)",
+                               ('2026-11-19', '{"fills": []}', None, 'failed', 'error', ''))
+            connection.execute("INSERT INTO daily_results VALUES (?, ?, ?, ?, ?, ?)",
+                               ('2026-11-20', None, '{"equity": "100"}', 'success', '', 'now'))
+        rows = self.client.get(url).json()
+        self.assertEqual([row['day'] for row in rows], ['2026-11-20', '2026-11-19'])
+        self.assertEqual(rows[0]['valuation_payload'], '{"equity": "100"}')
+        self.assertEqual(rows[1]['valuation_error'], 'error')
+
     def test_logs_are_ordered_paginated_and_validated(self):
         directory = self.root / 'logs/example'
         directory.mkdir(parents=True)

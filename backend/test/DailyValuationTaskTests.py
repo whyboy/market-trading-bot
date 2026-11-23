@@ -5,7 +5,7 @@ import unittest
 from datetime import date, datetime
 from decimal import Decimal
 from market_trading_bot.market.MarketProvider import SHANGHAI
-from market_trading_bot.notification.PushPlusNotifier import PushPlusNotifier
+from market_trading_bot.notification.PushNotifier import PushNotifier
 from market_trading_bot.service.AccountService import AccountService
 from market_trading_bot.service.DailyResultsService import DailyResultsService
 from market_trading_bot.task.DailySummaryTask import DailySummaryTask
@@ -135,7 +135,7 @@ class DailyValuationTaskTests(unittest.TestCase):
     def test_valuation_then_summary_sends_saved_returns_in_one_message(self):
         self.save_account(self.day)
         self.run_task()
-        notifier = PushPlusNotifier({'pushplus': {'token': 'test-token'}})
+        notifier = PushNotifier({'pushplus': {'token': 'test-token'}})
         summary = DailySummaryTask(self.root, self.settings, self.configs, notifier,
                                    self.context, self.stop, lambda: self.current.replace(minute=10))
         with patch.object(notifier.client, 'send', return_value='receipt') as send:

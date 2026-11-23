@@ -63,13 +63,13 @@ class AfterHoursTradingTests(unittest.TestCase):
                                   (friday.replace(hour=16), friday.date())):
             with self.subTest(current=current):
                 self.current = current
-                _, snapshots = market.load(tuple(self.config['parameters']['etf_pool']), 24)
+                _, snapshots = market.get_market_snapshot(tuple(self.config['parameters']['etf_pool']), 24)
                 for snapshot in snapshots.values():
                     self.assertEqual(snapshot.quote_time.date(), expected)
                     self.assertLess(snapshot.history[-1].date, expected)
 
     def test_configured_weekend_chain_uses_friday_close(self):
-        with patch('market_trading_bot.notification.PushPlusClient.PushPlusClient.send', return_value='receipt') as send:
+        with patch('market_trading_bot.notification.PushClient.PushClient.send', return_value='receipt') as send:
             scheduler = TaskScheduler(self.root)
             scheduler.start()
             scheduler.timer.pause()
