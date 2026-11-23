@@ -351,7 +351,7 @@ class TaskSchedulerTests(unittest.TestCase):
 
     def test_daily_jobs_prepare_calendar_on_first_run(self):
         self.current = DUE.replace(day=23, hour=15, minute=10)
-        with patch('market_trading_bot.TaskScheduler.DailyValuationTask') as valuation, \
+        with patch('market_trading_bot.TaskScheduler.DailyAccountSettlementTask') as valuation, \
              patch('market_trading_bot.TaskScheduler.DailySummaryTask') as summary:
             self.scheduler._start_valuation()
             self.scheduler._start_summary()
@@ -366,7 +366,7 @@ class TaskSchedulerTests(unittest.TestCase):
         self.calendar.side_effect = ValueError('网络失败')
         with patch.object(self.scheduler.stop_event, 'wait', return_value=True), \
              patch.object(self.scheduler, '_build_trade_task') as trade, \
-             patch('market_trading_bot.TaskScheduler.DailyValuationTask') as valuation, \
+             patch('market_trading_bot.TaskScheduler.DailyAccountSettlementTask') as valuation, \
              patch('market_trading_bot.TaskScheduler.DailySummaryTask') as summary:
             self.scheduler.prepare_calendar_context()
             self.scheduler._start_trades('etf_rotation')

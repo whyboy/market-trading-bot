@@ -37,7 +37,7 @@ market-trading-bot/
 │   │       ├── TaskScheduler.py           # 交易日判断与任务调度
 │   │       ├── task/                      # 调度器管理的一次性任务
 │   │       │   ├── TradingTask.py          # 单次策略执行及状态更新
-│   │       │   ├── DailyValuationTask.py  # 按配置时间更新估值
+│   │       │   ├── DailyAccountSettlementTask.py  # 按配置时间更新估值
 │   │       │   └── DailySummaryTask.py    # 按配置时间汇总并发送日报
 │   │       ├── strategy/                  # 策略实现
 │   │       │   ├── ETFRotationStrategyImpl.py
@@ -245,7 +245,7 @@ Azure 网络安全组放行 TCP `8080` 后，访问 `http://<服务器公网IP>:
 | 每日收益总结 | 每个策略配置的报告时间 | 汇总同一报告时间的策略账户；休市日使用最近收盘估值 |
 
 定时任务统一由外层 `TaskScheduler` 注册并管理，任务类集中在 `task/`：
-`TradingTask` 执行交易，`DailyValuationTask` 按配置时间更新估值，`DailySummaryTask` 按策略配置时间只读汇总并发送。
+`TradingTask` 执行交易，`DailyAccountSettlementTask` 按配置时间更新估值，`DailySummaryTask` 按策略配置时间只读汇总并发送。
 调度器统一获取并缓存当天日历，将是否交易日、上一交易日传给日报任务；任务不重复获取日历。
 报告为纯文本，由 `notification/report/` 中的 `TradeExecutionReport`、`DailyAccountReport` 生成。
 累计收益以账本实际开户资金为基准，包含交易费用。当日收益比较上一交易日收盘资产；首次开户以开户资金为基准。

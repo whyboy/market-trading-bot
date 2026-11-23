@@ -8,13 +8,13 @@ from market_trading_bot.market.MarketProvider import SHANGHAI
 from market_trading_bot.notification.PushNotifier import PushNotifier
 from market_trading_bot.service.AccountService import AccountService
 from market_trading_bot.service.DailyResultsService import DailyResultsService
+from market_trading_bot.task.DailyAccountSettlementTask import DailyAccountSettlementTask
 from market_trading_bot.task.DailySummaryTask import DailySummaryTask
-from market_trading_bot.task.DailyValuationTask import DailyValuationTask
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 
-class DailyValuationTaskTests(unittest.TestCase):
+class DailyAccountSettlementTaskTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -26,7 +26,7 @@ class DailyValuationTaskTests(unittest.TestCase):
         self.context = {'day': self.day, 'is_trading_day': True, 'previous_trading_day': date(2026, 11, 19)}
         self.stop = threading.Event()
         self.running = Mock(return_value=False)
-        self.task = DailyValuationTask(self.root, self.settings, self.configs, self.context,
+        self.task = DailyAccountSettlementTask(self.root, self.settings, self.configs, self.context,
                                        self.stop, self.running, lambda: self.current)
         self.market = Mock()
         self.market.closing_prices.side_effect = lambda symbols, day: {
@@ -45,7 +45,7 @@ class DailyValuationTaskTests(unittest.TestCase):
         return repository
 
     def run_task(self):
-        with patch('market_trading_bot.task.DailyValuationTask.MarketProvider', return_value=self.market):
+        with patch('market_trading_bot.task.DailyAccountSettlementTask.MarketProvider', return_value=self.market):
             return self.task.run()
 
     def result(self, day='2026-11-20'):
@@ -71,7 +71,7 @@ class DailyValuationTaskTests(unittest.TestCase):
         self.market.closing_prices.reset_mock()
         self.market.closing_prices.side_effect = TimeoutError('temporary outage')
         for context in (self.context, {'day': self.day, 'notice': '交易日历获取失败'}):
-            self.task = DailyValuationTask(self.root, self.settings, self.configs, context,
+            self.task = DailyAccountSettlementTask(self.root, self.settings, self.configs, context,
                                            self.stop, self.running, lambda: self.current)
             self.assertTrue(self.run_task())
             self.assertEqual(self.result(), saved)
@@ -157,7 +157,7 @@ class DailyValuationTaskTests(unittest.TestCase):
 
         self.market.closing_prices.side_effect = close
         notifier = Mock()
-        with patch('market_trading_bot.task.DailyValuationTask.MarketProvider', return_value=self.market):
+        with patch('market_trading_bot.task.DailyAccountSettlementTask.MarketProvider', return_value=self.market):
             self.task.start()
             try:
                 self.assertTrue(entered.wait(2))

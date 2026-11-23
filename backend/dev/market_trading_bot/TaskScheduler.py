@@ -12,8 +12,8 @@ from market_trading_bot.notification.PushNotifier import PushNotifier
 from market_trading_bot.service.AccountService import AccountService
 from market_trading_bot.strategy.ETFRotationStrategyImpl import ETFRotationStrategyImpl
 from market_trading_bot.task.CandleRefreshTask import CandleRefreshTask
+from market_trading_bot.task.DailyAccountSettlementTask import DailyAccountSettlementTask
 from market_trading_bot.task.DailySummaryTask import DailySummaryTask
-from market_trading_bot.task.DailyValuationTask import DailyValuationTask
 from market_trading_bot.task.TradingTask import TradingTask
 from market_trading_bot.trading.TradeExecutor import TradeExecutor
 from pathlib import Path
@@ -235,7 +235,7 @@ class TaskScheduler:
                 return
             close_day = day if context['is_trading_day'] and self.now().time() >= time(15) else context['previous_trading_day']
             valuation_context = {**context, 'is_trading_day': True, 'price_day': close_day}
-            task = DailyValuationTask(self.root, self.settings, self.configs, valuation_context,
+            task = DailyAccountSettlementTask(self.root, self.settings, self.configs, valuation_context,
                                       self.stop_event, self._is_trade_running, self.now)
             self.valuation_task = task
             task.start()
