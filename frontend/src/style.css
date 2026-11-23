@@ -95,3 +95,11 @@ footer { margin: 28px 0 0; text-align: center; }
 .trade-side.buy { color: #1d7951; background: #e8f5ed; }
 .trade-side.sell { color: #b95751; background: #fbefed; }
 .load-fills { margin-top: 14px; }
+
+.daily-results-action { margin-top: 1rem; }
+.daily-dialog { width: min(1100px, 92vw); max-height: 85vh; border: 0; border-radius: 12px; padding: 24px; box-shadow: 0 16px 60px #0004; }
+.daily-dialog::backdrop { background: #0009; }
+.daily-table { overflow: auto; }
+.daily-table td { vertical-align: top; }
+.daily-table summary { cursor: pointer; white-space: nowrap; }
+.daily-table pre { max-width: 420px; max-height: 300px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }

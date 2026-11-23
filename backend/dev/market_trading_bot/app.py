@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from market_trading_bot.service.AccountService import AccountService
+from market_trading_bot.service.DailyResultsService import DailyResultsService
 from market_trading_bot.TaskScheduler import TaskScheduler
 from pathlib import Path
 
@@ -81,6 +82,16 @@ def account_valuations(instance_id: str):
     if not any(instance['id'] == instance_id for item in load_strategies() for instance in item.get('instances', [])):
         raise HTTPException(404, '账户不存在')
     return AccountService.get_valuations(ROOT / load_settings()['storage']['data_dir'], instance_id)
+
+
+@app.get('/api/accounts/{instance_id}/daily-results')
+def account_daily_results(instance_id: str):
+    """只读查询账户每日交易和估值记录。"""
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', instance_id):
+        raise HTTPException(404, '账户不存在')
+    if not any(instance['id'] == instance_id for item in load_strategies() for instance in item.get('instances', [])):
+        raise HTTPException(404, '账户不存在')
+    return DailyResultsService.get_all_daily_results(ROOT / load_settings()['storage']['data_dir'], instance_id)
 
 
 @app.get('/api/strategies/{strategy_id}/candles')

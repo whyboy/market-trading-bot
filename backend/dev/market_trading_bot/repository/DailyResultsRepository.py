@@ -57,3 +57,7 @@ class DailyResultsRepository:
     @staticmethod
     def first_execution(connection, parameters=()):
         return connection.execute('SELECT execution_payload FROM daily_results WHERE execution_payload IS NOT NULL ORDER BY day LIMIT 1', parameters)
+
+    @staticmethod
+    def all_daily_results(connection, parameters=()):
+        return connection.execute('SELECT * FROM daily_results ORDER BY day DESC', parameters)

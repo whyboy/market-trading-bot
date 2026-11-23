@@ -8,14 +8,14 @@ from market_trading_bot.service.AccountService import AccountService
 from market_trading_bot.service.DailyResultsService import DailyResultsService
 
 
-class DailyValuationTask:
+class DailyAccountSettlementTask:
     class Stopped(RuntimeError):
         pass
 
     def __init__(self, root, settings, configs, context, stop_event, is_trade_running, now):
         """创建估值线程；context 为当天日历，stop_event 与调度器共享。"""
         self.context = context
-        self.thread = threading.Thread(target=self._run, name='daily-valuation-task', daemon=True)
+        self.thread = threading.Thread(target=self._run, name='daily-account-settlement-task', daemon=True)
         self.completed = False
         self.directory = root / settings['storage']['data_dir']
         self.settings = settings

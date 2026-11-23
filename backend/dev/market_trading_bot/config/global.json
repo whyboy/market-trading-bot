@@ -24,8 +24,8 @@
     "trade_timeout_seconds": 300
   },
   "schedule": {
-    "calendar_time": "08:50",
-    "morning_notification_time": "09:00",
+    "calendar_time": "07:50",
+    "morning_notification_time": "08:00",
     "valuation_time": "15:05"
   }
 }
