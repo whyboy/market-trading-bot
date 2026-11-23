@@ -82,8 +82,12 @@ class TaskScheduler:
             schedule = self.settings['schedule']
             calendar_time = time.fromisoformat(schedule['calendar_time'])
             valuation_time = time.fromisoformat(schedule['valuation_time'])
+            morning_time = time.fromisoformat(schedule.get('morning_notification_time', '09:00'))
             self.timer.add_job(self.prepare_calendar_context, 'cron', hour=calendar_time.hour,
                                minute=calendar_time.minute, second=calendar_time.second, id='_calendar',
+                               coalesce=True, max_instances=1, misfire_grace_time=300)
+            self.timer.add_job(self._send_morning_greeting, 'cron', hour=morning_time.hour,
+                               minute=morning_time.minute, second=morning_time.second, id='_morning_greeting',
                                coalesce=True, max_instances=1, misfire_grace_time=300)
             self.timer.add_job(self._start_valuation, 'cron', hour=valuation_time.hour,
                                minute=valuation_time.minute, second=valuation_time.second, id='_daily_valuation',
@@ -150,6 +154,15 @@ class TaskScheduler:
         self.calendar_error = None
         return {'day': day, 'is_trading_day': day in calendar,
                 'previous_trading_day': max(value for value in calendar if value < day)}
+
+    def _send_morning_greeting(self):
+        """每天发送早安通知，使用已准备好的当日日历状态。"""
+        if self.stop_event.is_set():
+            return
+        today = self.now().date()
+        context = self.calendar_context
+        trading_day = context['is_trading_day'] if context and context['day'] == today else None
+        self.notifier.send_morning_greeting(trading_day)
 
     def _start_trades(self, strategy_id, day=None):
         """为启用账户启动独立交易任务，跳过仍在运行的账户。"""

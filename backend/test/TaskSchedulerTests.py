@@ -47,9 +47,14 @@ class TaskSchedulerTests(unittest.TestCase):
         self.current = DUE.replace(hour=9, minute=0)
         self.scheduler.prepare_calendar_context()
 
-    def test_daily_calendar_trigger_is_nine_am(self):
+    def test_morning_greeting_uses_configured_time(self):
+        trigger = self.scheduler.timer.get_job('_morning_greeting').trigger
+        self.assertEqual(trigger.get_next_fire_time(None, self.current),
+                         self.current.replace(hour=9, minute=0))
+
+    def test_daily_calendar_trigger_is_eight_fifty(self):
         trigger = self.scheduler.timer.get_job('_calendar').trigger
-        morning = DUE.replace(hour=9, minute=0)
+        morning = DUE.replace(hour=8, minute=50)
         self.assertEqual(trigger.get_next_fire_time(None, self.current), morning)
         self.assertEqual(trigger.get_next_fire_time(morning, morning + timedelta(seconds=1)), morning + timedelta(days=1))
         self.assertEqual(self.scheduler.tasks, {})
@@ -294,9 +299,9 @@ class TaskSchedulerTests(unittest.TestCase):
 
     def test_valuation_and_summary_have_daily_cron_triggers(self):
         valuation = self.scheduler.timer.get_job('_daily_valuation')
-        summary = self.scheduler.timer.get_job('_daily_report_15:15')
+        summary = self.scheduler.timer.get_job('_daily_report_15:10')
         self.assertEqual(valuation.trigger.get_next_fire_time(None, self.current), DUE.replace(hour=15, minute=5))
-        self.assertEqual(summary.trigger.get_next_fire_time(None, self.current), DUE.replace(hour=15, minute=15))
+        self.assertEqual(summary.trigger.get_next_fire_time(None, self.current), DUE.replace(hour=15, minute=10))
 
     def test_report_times_register_separate_jobs_and_select_strategies(self):
         self.scheduler.stop()
@@ -306,7 +311,7 @@ class TaskSchedulerTests(unittest.TestCase):
         try:
             scheduler.start()
             scheduler.timer.pause()
-            self.assertIsNotNone(scheduler.timer.get_job('_daily_report_15:15'))
+            self.assertIsNotNone(scheduler.timer.get_job('_daily_report_15:10'))
             self.assertIsNotNone(scheduler.timer.get_job('_daily_report_19:30'))
             self.current = DUE.replace(hour=19, minute=30)
             with patch('market_trading_bot.TaskScheduler.DailySummaryTask') as task:
